@@ -1,6 +1,8 @@
+# -*- make -*-
 SCRIPT = 16f1847.lkr
 PROJECT = gateway
 OTGWOBJECTS = gateway.o ds1820.o selfprog.o
+DIAGOBJECTS = diagnose.o selfprog.o
 OUTPUT = $(PROJECT).hex
 COD = $(PROJECT).cod
 GPASM = gpasm
@@ -9,6 +11,9 @@ TCLSH = tclsh
 
 $(OUTPUT) $(COD): $(OTGWOBJECTS) $(SCRIPT)
 	$(GPLINK) --map -s $(SCRIPT) -o $@ $(OTGWOBJECTS)
+
+diagnose.hex: $(DIAGOBJECTS) $(SCRIPT)
+	$(GPLINK) --map -s $(SCRIPT) -o $@ $(DIAGOBJECTS)
 
 %.o: %.asm
 	$(GPASM) -c $<
