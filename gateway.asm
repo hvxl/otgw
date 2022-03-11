@@ -1,7 +1,7 @@
 		title		"OpenTherm Gateway"
 		list		p=16F1847, b=8, r=dec
 
-;Copyright (c) 2009, 2011, 2012, 2013, 2014, 2015, 2020, 2021 - Schelte Bron
+;Copyright (c) 2022 - Schelte Bron
 
 #define		version		"6.0"
 #define		phase		"."	;a=alpha, b=beta, .=production
@@ -303,7 +303,7 @@ mode		res	1
 MONMODEBIT	equ	0	;Position of the bit returned by CheckBoolean
 #define		MonitorMode	mode,MONMODEBIT
 #define		ChangeMode	mode,1
-#define		AlternativeUsed mode,2		;Must be in shared RAM
+#define		AlternativeUsed	mode,2		;Must be in shared RAM
 #define		FailSafeMode	mode,3		;Must be outside wiped RAM
 
 Bank0data	UDATA
@@ -375,9 +375,9 @@ stateflags	res	1			;General bit flags
 #define		MessageRcvd	stateflags,0
 #define		Unsolicited	stateflags,1
 #define		HideReports	stateflags,2
-#define		CommandComplete stateflags,3
+#define		CommandComplete	stateflags,3
 #define		NoAlternative	stateflags,4
-#define		AlternativeDone stateflags,5
+#define		AlternativeDone	stateflags,5
 #define		OverrideUsed	stateflags,6
 #define		BoilerResponse	stateflags,7
 
@@ -420,7 +420,7 @@ initflags	res	1
 #define		InitHotWater	initflags,1
 #define		InitHeating	initflags,2
 #define		WaterSetpoint	initflags,3
-#define		MaxHeatSetpoint initflags,4
+#define		MaxHeatSetpoint	initflags,4
 #define		NoResetUnknown	initflags,6
 #define		PriorityMsg	initflags,7
 
@@ -430,8 +430,8 @@ onoffflags	res	1			;General bit flags
 #define		NoThermostat	onoffflags,2
 #define		HeatDemand	onoffflags,3
 #define		ReturnInvalid	onoffflags,4
-#define		SendUserMessage onoffflags,5	;User message in standalone mode
-#define		UserMaxModLevel onoffflags,6
+#define		SendUserMessage	onoffflags,5	;User message in standalone mode
+#define		UserMaxModLevel	onoffflags,6
 #define		OneSecond	onoffflags,7	;Time to send the next message
 
 gpioflags	res	1			;General bit flags
@@ -553,7 +553,7 @@ pkg
 
 pcall		macro	rtn
 		lcall	rtn
-		pagesel $
+		pagesel	$
 		endm
 
 ;Get the output of the active comparator into the carry bit
@@ -583,7 +583,7 @@ InterruptVector	code	0x0004
 		banksel	TMR2		;Bank 0
 		movfw	TMR2
 		movwf	s_timer2	;Save the current value of timer2
-		pagesel Interrupt
+		pagesel	Interrupt
 		;Process the timer 2 interrupt before the comparator
 		;interrupt to get the correct overflow count
 		btfsc	PIR1,TMR2IF	;Check if timer 2 matched
@@ -608,13 +608,13 @@ InterruptVector	code	0x0004
 ;bitcount>0 && quarter>3 && quarter<=6 && CXOUT:=0: Bit: 0. Restart T2
 ;bitcount>0 && quarter>3 && quarter<=6 && CXOUT:=1: Bit: 1. Restart T2
 
-		package Interrupt
+		package	Interrupt
 
 ;Comparator interrupt routine
 inputint	comf	tstatflags,W	;Get the inverted Smart power bits
-		banksel CMOUT
+		banksel	CMOUT
 		xorwf	CMOUT,W		;Read to end the mismatch condition
-		banksel PIR2
+		banksel	PIR2
 		bcf	PIR2,C1IF	;Clear the interrupt, if comparator 1
 		bcf	PIR2,C2IF	;Clear the interrupt, if comparator 2
 		xorwf	msgflags,W	;Determine which comparator has changed
@@ -663,14 +663,14 @@ inputboiler	tstf	bitcount	;Is a message in progress?
 		btfsc	Parity		;Check for even parity
 		goto	error04		;Parity error
 		bsf	MessageRcvd	;Indicate that a message was received
-		pagesel Message
+		pagesel	Message
 		movlw	'R'		;Receive function
 		call	SwitchOffLED	;Switch off the receive LED
 		movlw	'T'		;Thermostat function
 		call	SwitchOffLED	;Switch off the thermostat LED
 		movlw	'B'		;Boiler function
 		call	SwitchOffLED	;Switch off the boiler LED
-		pagesel Interrupt
+		pagesel	Interrupt
 		bcf	Request		;Thermostat is done
 inputspike	bcf	T2CON,TMR2ON	;Stop timer 2
 		goto	activity	;End of the interrupt routine
@@ -683,12 +683,12 @@ inputabort	clrf	bitcount	;Abort message
 		xorwf	PORTA,W		;Check against the current state
 		andlw	b'00011000'	;Only consider port 3 and 4
 		xorwf	PORTA,F		;Update the ports
-		pagesel Message
+		pagesel	Message
 		movlw	'X'
 		call	SwitchOffLED	;Switch off transmit LED
 		movlw	'B'
 		call	SwitchOffLED	;Switch off boiler LED
-		pagesel Interrupt
+		pagesel	Interrupt
 		goto	restarttimer	;Reset T2 and 1/4 ms counter
 
 storebit	;Store the current bit in the message buffer
@@ -727,9 +727,9 @@ InputEvent	;The line state changed while not receiving a message. Need to
 		movwf	TMR2		;Initialize timer 2
 		bsf	T2CON,TMR2ON	;Start timer2
 		clrf	quarter		;Reset the 1/4 ms counter
-		banksel PIE1		;Bank 1
+		banksel	PIE1		;Bank 1
 		bsf	PIE1,TMR2IE	;Enable timer2 interrupts
-		banksel PIR1		;Bank 0
+		banksel	PIR1		;Bank 0
 		goto	activity	;The change has no meaning
 
 InputProcess	;A second line change happened shortly after the previous one.
@@ -743,14 +743,14 @@ InputFast	getcompout		;Get the comparator output
 StartBit	tstf	quarter		;Check if pulse was less than 250us
 		skpnz
 		goto	inputspike	;Ignore spikes
-		pagesel Message
+		pagesel	Message
 		movlw	'R'		;Receive function
 		call	SwitchOnLED	;Turn on the receive LED
 		movlw	'B'		;Boiler function
 		btfsc	Request
 		movlw	'T'		;Thermostat function
 		call	SwitchOnLED	;Switch on the boiler or thermostat LED
-		pagesel Interrupt
+		pagesel	Interrupt
 		movlw	33		;Message length: 32 bits + stop bit - 1
 		movwf	bitcount	;Initialize the counter
 		bcf	Parity		;Initialize the parity check flag
@@ -833,14 +833,14 @@ timer2xmitend	bcf	T2CON,TMR2ON	;Stop timer 2
 		bcf	Transmit	;Finished transmitting
 		btfsc	outputmask,4	;Transmission to the thermostat?
 		bsf	Intermission	;Message exchange is finished
-		pagesel Message
+		pagesel	Message
 		movlw	'X'		;Transmit function
 		call	SwitchOffLED	;Switch off the transmit LED
 		movlw	'T'		;Thermostat function
 		call	SwitchOffLED	;Switch off the thermostat LED
 		movlw	'B'		;Boiler function
 		call	SwitchOffLED	;Switch off the boiler LED
-		pagesel Interrupt
+		pagesel	Interrupt
 		return			;Return from the interrupt routine
 
 InvertBit	movlw	NextBitMask	;Load a mask for the NextBit flag
@@ -924,7 +924,7 @@ errorcleanup	tstf	errornum
 		clrf	bitcount
 		clrf	quarter
 		bcf	Transmit
-		pagesel Message
+		pagesel	Message
 		movlw	'X'
 		call	SwitchOffLED	;Switch off the transmit LED
 		movlw	'R'
@@ -933,7 +933,7 @@ errorcleanup	tstf	errornum
 		call	SwitchOffLED	;Switch off the boiler LED
 		movlw	'T'
 		call	SwitchOffLED	;Switch off the thermostat LED
-		pagesel $
+		pagesel	$
 		comf	errornum,W
 		skpnz
 		goto	errorskip	;Not a real error
@@ -947,7 +947,7 @@ errorskip	goto	activity	;Wait for the line to go idle
 ; Main program
 ;########################################################################
 
-		package Main
+		package	Main
 Break
 		banksel	BreakTimer	;Bank 1
 		btfsc	NoBreak
@@ -956,12 +956,12 @@ Break
 		banksel	0		;Bank 0
 		goto	MainLoop	;continue running the mainloop
 Restart1
-		banksel resetreason	;Bank 1
+		banksel	resetreason	;Bank 1
 		bsf	resetreason,2	;Reset because we're stuck in a loop
 Restart2	bsf	resetreason,1	;Reset due to BREAK on serial line
 		pcall	SelfProg	;Jump to the self-programming code
 Start
-		banksel LATB		;Bank 2
+		banksel	LATB		;Bank 2
 		clrf	LATB		;Flash the LED's on startup
 		banksel	OSCCON		;Bank 1
 		movlw	b'01101010'	;Internal oscillator set to 4MHz
@@ -975,7 +975,7 @@ Start
 		;Pins 3 and 4 are (comparator) ouputs
 		;Pin 5 is master reset input
 		;Pins 6 and 7 are GPIO
-		banksel ANSELA		;Bank 3
+		banksel	ANSELA		;Bank 3
 		movlw	b'00000111'	;A0 through A2 are used for analog I/O
 		movwf	ANSELA
 
@@ -990,7 +990,7 @@ Start
 		bsf	APFCON1,TXCKSEL	;TX on RB5
 		bsf	APFCON0,RXDTSEL	;RX on RB2
 
-		banksel TRISA		;Bank 1
+		banksel	TRISA		;Bank 1
 		movlw	b'11100111'
 		movwf	TRISA
 		movlw	b'00000111'
@@ -1069,7 +1069,7 @@ Start
 		;Bit 4 TSRNG = 0 - Temperature indicator low range
 		;Bit 3-2 CDAFVR = 2 - DAC fixed voltage is 2.048
 		;Bit 1-0 ADFVR = 2 - ADC fixed voltage is 2.048
-		banksel FVRCON		;Bank 2
+		banksel	FVRCON		;Bank 2
 #ifndef __DEBUG
 		movlw	b'10001010'
 #else
@@ -1131,7 +1131,7 @@ WaitConvert	btfsc	ADCON0,GO	;Check that A/D conversion is finished
 		movlw	SavedSettings
 		call	ReadEpromData	;Get the setting from EEPROM
 		movwf	settings	;Store a copy in RAM
-		banksel DACCON1		;Bank 1
+		banksel	DACCON1		;Bank 1
 		movwf	DACCON1		;Set the reference voltage
 
 		movlw	Configuration
@@ -1148,10 +1148,10 @@ WaitConvert	btfsc	ADCON0,GO	;Check that A/D conversion is finished
 		movlw	b'0100110'	;1:16 prescaler, 1:5 postscaler
 		movwf	T4CON
 
-		banksel CMOUT		;Bank 2
+		banksel	CMOUT		;Bank 2
 		comf	CMOUT,W
 		clrf	STATUS
-		banksel PIR2		;Bank 0
+		banksel	PIR2		;Bank 0
 		clrf	PIR2		;Clear any comparator interrupt
 		andlw	b'00000011'
 		movwf	msgflags
@@ -1309,7 +1309,7 @@ MainLoop	clrwdt
 		goto	MainLoop
 
 		;FERR is only relevant if RCIF is set
-		banksel RCSTA		;Bank 3
+		banksel	RCSTA		;Bank 3
 		btfss	RCSTA,FERR	;Check for framing error (break)
 		bra	SerialEvent
 		tstf	RCREG		;Check received char is 0
@@ -1322,7 +1322,7 @@ SerialEvent	btfss	RCSTA,OERR	;Check for overrun error
 		goto	SerialEventJmp1
 		bcf	RCSTA,CREN	;Procedure to clear an overrun error
 		bsf	RCSTA,CREN	;Re-enable the serial interface
-		banksel 0
+		banksel	0
 		bsf	Overrun		;Remember for later reporting
 		goto	MainLoop
 SerialEventJmp1	call	SerialReceive
@@ -1331,12 +1331,12 @@ SerialEventJmp1	call	SerialReceive
 		lcall	SerialCommand
 		clrf	rxpointer	;Prepare for a new command
 		bcf	CommandComplete
-		pagesel Print
+		pagesel	Print
 		iorlw	0
 		skpz
 		call	PrintString	;Print the result
 		call	NewLine
-		pagesel $
+		pagesel	$
 		call	PrtDebugPointer
 		goto	MainLoop
 
@@ -1358,15 +1358,15 @@ ClearBankLoop	clrf	INDF0
 
 ;Callers depend on this function never setting the carry bit
 SerialReceive
-		banksel rxpointer
+		banksel	rxpointer
 		movlw	high rxbuffer
 		movwf	FSR1H
 		movfw	rxpointer
 		addlw	rxbuffer
 		movwf	FSR1L
-		banksel RCREG
+		banksel	RCREG
 		movfw	RCREG
-		banksel stateflags
+		banksel	stateflags
 		btfsc	CommandComplete
 		return			;Not ready to accept a command now
 		movwf	INDF1
@@ -1409,7 +1409,7 @@ SendMessage	movlw	1
 		bsf	NextBit		;Start bit is 1
 		bsf	Transmit	;Starting to transmit a message
 		movlw	'X'		;Transmit function
-		pagesel Message
+		pagesel	Message
 		call	SwitchOnLED	;Switch on the transmit LED
 		movlw	'T'		;Thermostat function
 		btfss	MsgResponse
@@ -1422,9 +1422,9 @@ SendBoiler	movlw	'B'		;Boiler function
 		movwf	outputmask
 		movlw	34		;A message is 32 bits + start & stop bit
 		movwf	bitcount	;Load the counter
-		banksel PIE1		;Bank 1
+		banksel	PIE1		;Bank 1
 		bsf	PIE1,TMR2IE	;Enable timer 2 interrupts
-		banksel TMR2		;Bank 1
+		banksel	TMR2		;Bank 1
 		movlw	PERIOD
 		movwf	TMR2		;Prepare timer 2 to overflow asap
 		bsf	T2CON,TMR2ON	;Start timer 2
@@ -1443,7 +1443,7 @@ ReportPower	bcf	PowerReport	;Print the report only once
 		return			;Don't report the power change
 ReportPowerJ1	lcall	PrintPowerlevel
 		call	PrintStringNL	;Print the new power setting
-		pagesel $
+		pagesel	$
 		return
 
 ;TickTimer is called whenever timer 4 overflows (every 20 ms)
@@ -1465,23 +1465,23 @@ TickTimer	bcf	PIR3,TMR4IF	;Clear Timer 4 overflow flag
 
 ; IdleTimer is called whenever timer 0 overflows
 IdleTimer
-		banksel BreakTimer	;Bank 1
+		banksel	BreakTimer	;Bank 1
 		btfss	NoBreak
 		incf	BreakTimer,F
 		banksel	T2CON		;Bank 0
 		btfss	T2CON,TMR2ON
 		call	StartConversion	;Start A/D conversion
-		pagesel Serial
+		pagesel	Serial
 		btfsc	ChangeMode	;Is a request to change mode pending?
 		call	SetMonitorMode
-		pagesel Print
+		pagesel	Print
 		comf	errornum,W	;Suppressing errors?
 		skpnz
 		clrf	errornum	;Re-enable errordetection
 		tstf	errornum	;Check if any errors were detected
 		skpz
 		call	PrintError	;Report the error on the serial intf
-		pagesel Main
+		pagesel	Main
 		tstf	errortimer
 		skpz
 		decfsz	errortimer,F
@@ -1491,9 +1491,9 @@ IdleTimer
 		return
 
 StartConversion
-		banksel ADCON0		;Bank 1
+		banksel	ADCON0		;Bank 1
 		bsf	ADCON0,GO	;Start A/D conversion
-		banksel 0		;Bank 0
+		banksel	0		;Bank 0
 		return
 
 FlashTimer	bcf	PIR1,TMR1IF	;Clear timer overrun flag
@@ -1541,9 +1541,9 @@ ProcessOutput	btfss	PIR1,TXIF	;Check if the transmit buffer is empty
 		bsf	FSR0H,1		;The buffer is in bank 4
 		movfw	INDF0		;Get the character from the buffer
 		clrf	FSR0H		;Restore the register to normal
-		banksel TXREG		;Bank 3
+		banksel	TXREG		;Bank 3
 		movwf	TXREG		;Load the serial transmitter
-		banksel txpointer	;Bank 0
+		banksel	txpointer	;Bank 0
 		incf	txpointer,F	;Move to the next character
 		movlw	TXBUFSIZE
 		xorwf	txpointer,W	;Check for the end of the buffer
@@ -1554,10 +1554,10 @@ ProcessOutput	btfss	PIR1,TXIF	;Check if the transmit buffer is empty
 
 ;This code should not set the carry bit, it may clear the carry
 EepromWait
-		banksel EECON1		;Bank 3
+		banksel	EECON1		;Bank 3
 		btfss	EECON1,WR	;Check if a write is in progress
 		return			;Safe to modify the EEPROM registers
-		banksel PIR1		;Bank 0
+		banksel	PIR1		;Bank 0
 		btfss	PIR1,RCIF	;Check for serial receiver activity
 		goto	EepromWait	;Wait some more
 		movwf	temp2		;Preserve value in W register
@@ -1600,7 +1600,7 @@ ReadEpromData	call	EepromWait	;Wait for any pending EEPROM activity
 ;on/off thermostat (or no thermostat at all).
 
 CheckThermostat	bcf	PIR1,ADIF	;Clear flag for next round
-		banksel ADRESH		;Bank 1
+		banksel	ADRESH		;Bank 1
 		movfw	ADRESH		;Get the A/D result
 		xorwf	LineVoltage,W	;Swap values of W and LineVoltage
 		xorwf	LineVoltage,F
@@ -1730,12 +1730,12 @@ CalcThresholdL1	skpnc
 
 ;************************************************************************
 
-		package Print
+		package	Print
 PrintString	pcall	ReadEpromData	;Read character from EEPROM
 		skpnz
 		return			;End of string
 		call	PrintChar	;Send character to serial port
-		banksel EEADRL		;Bank 3
+		banksel	EEADRL		;Bank 3
 		incf	EEADRL,W	;Next address
 		goto	PrintString
 
@@ -1761,9 +1761,9 @@ PrintChar	tstf	txavailable	;Check if some data is already waiting
 		skpnz
 		btfss	PIR1,TXIF	;Check the transmit register
 		goto	PrintBuffer	;Need to put the byte into the buffer
-		banksel TXREG		;Bank 3
+		banksel	TXREG		;Bank 3
 		movwf	TXREG		;Can transmit immediately
-		banksel 0		;Bank 0
+		banksel	0		;Bank 0
 		retlw	0
 PrintBuffer	movwf	FSR0L		;Abuse FSR0L for temporary storage
 		movfw	txpointer	;Current position in the transmit buffer
@@ -2196,7 +2196,7 @@ MultiplyLoop	lslf	float2,F
 ;************************************************************************
 ;Process an incoming OpenTherm message
 ;************************************************************************
-		package Message
+		package	Message
 HandleMessage	btfsc	MsgResponse	;Treat requests and responses differently
 		goto	HandleResponse
 HandleRequest	btfsc	byte1,4		;For Write-Data messages, ...
@@ -2817,7 +2817,7 @@ MessageID28	btfsc	MsgResponse	;Do not modify a request
 		btfsc	ReturnInvalid
 		goto	messageinv
 		call	messageack	;Turn request into acknowledgement
-		banksel returnwater1	;Bank 2
+		banksel	returnwater1	;Bank 2
 		movfw	returnwater1
 		call	setbyte3
 		movfw	returnwater2
@@ -3290,7 +3290,7 @@ SwitchOffLED	addlw	functions - 'A'	;Point into the table of functions
 ; Parse commands received on the serial interface
 ;************************************************************************
 
-		package Serial
+		package	Serial
 SerialCommand	btfsc	Overrun
 		goto	SerialOverrun
 SerialCmdSub	movlw	low rxbuffer
@@ -3925,7 +3925,7 @@ WriteEpromData	pcall	EepromWait	;Wait for any pending EEPROM activity
 		movwf	EEADR		;Setup the EEPROM data address
 StoreEpromTemp	movfw	temp		;Get the value to store in EEPROM
 StoreEpromData
-		banksel EECON1		;Bank 3
+		banksel	EECON1		;Bank 3
 		bsf	EECON1,RD	;Read the current value
 		xorwf	EEDATL,W	;Check if the write can be skipped
 		skpnz
@@ -3943,7 +3943,7 @@ StoreEpromData
 		bsf	INTCON,GIE	;Interrupts are allowed again
 		bcf	EECON1,WREN	;Prevent accidental writes
 StoreEpromSkip	movfw	EEDATL		;Return the byte that was written
-		banksel 0		;Bank 0
+		banksel	0		;Bank 0
 		return
 
 SetAlternative	call	GetDecimalArg	;Get the message number
@@ -3986,7 +3986,7 @@ DelAltLoop	pcall	ReadEpromData	;Read a byte from EEPROM
 		xorwf	temp,W		;Compare to the message ID to delete
 		skpnz
 		goto	StoreEpromData	;Release the slot by writing 0 to it
-		banksel EEADR		;Bank 3
+		banksel	EEADR		;Bank 3
 		incfsz	EEADR,W		;Proceed to the next slot
 		goto	DelAltLoop	;Repeat the loop
 		banksel	0		;Bank 0
@@ -4046,7 +4046,7 @@ SetupCompModule	bcf	MonitorMode
 		;Bit 5-4 = 1 - CxVP connects to DAC voltage reference
 		;Bit 3-2 Unimplemented
 		;Bit 1-0 = 0 - C12IN0- (RA0) / 1 - C12IN1- (RA1)
-		banksel CM1CON0		;Bank 2
+		banksel	CM1CON0		;Bank 2
 #ifndef __DEBUG
 		movlw	b'11010000'
 		movwf	CM1CON1
@@ -4542,7 +4542,7 @@ SetCtrlSetpt2	call	GetPosFloatArg
 ; Implement the GPIO port functions
 ;************************************************************************
 
-		package gpio
+		package	gpio
 		constant GPIO_NONE=0
 		constant GPIO_GND=1
 		constant GPIO_VCC=2
@@ -4575,13 +4575,13 @@ gpio_onewire	movlw	b'11110000'
 		andwf	GPIOFunction,F	;Disable function on port 1
 gpio_input	movfw	gpio_mask	;Get the port mask
 		andlw	b'11000000'	;Mask of the other bits
-		banksel TRISA
+		banksel	TRISA
 		iorwf	TRISA,F		;Set the port to input
 		banksel	0
 		return
 gpio_output	comf	gpio_mask,W	;Get the inverted port mask
 		iorlw	b'00111111'	;Set all other bits
-		banksel TRISA
+		banksel	TRISA
 		andwf	TRISA,F		;Set the port to output
 		banksel	0
 		return
