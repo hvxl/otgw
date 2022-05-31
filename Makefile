@@ -16,7 +16,7 @@ diagnose.hex: $(DIAGOBJECTS) $(SCRIPT)
 	$(GPLINK) --map -s $(SCRIPT) -o $@ $(DIAGOBJECTS)
 
 %.o: %.asm
-	$(GPASM) -c $<
+	$(GPASM) $(CFLAGS) -c $<
 
 gateway.o: build.asm
 

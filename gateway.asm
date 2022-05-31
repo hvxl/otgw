@@ -3,9 +3,9 @@
 
 ;Copyright (c) 2022 - Schelte Bron
 
-#define		version		"6.0"
+#define		version		"6.1"
 #define		phase		"."	;a=alpha, b=beta, .=production
-;#define	patch		"5"	;Comment out when not applicable
+;#define 	patch		"2"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -336,7 +336,8 @@ controlsetpt2	res	1
 controlsetpt3	res	1	;Control Setpoint for CH2 high byte
 controlsetpt4	res	1	;Control Setpoint for CH2 low byte
 ventsetpoint	res	1
-debug		res	1
+DebugPointerL	res	1
+DebugPointerH	res	1
 outputmask	res	1	;This var can quite easily be freed, if needed
 messagetype	res	1
 alternativecmd	res	1
@@ -1060,8 +1061,6 @@ Start
 		bcf	TXSTA,SYNC	;Asynchronous
 		bsf	TXSTA,TXEN	;Enable transmit
 		bsf	RCSTA,SPEN	;Enable serial port
-		btfss	FailSafeMode
-		bsf	RCSTA,CREN	;Enable receive
 
 		;Configure fixed voltage reference
 		;Bit 7 FVREN = 1 - FVR enabled
@@ -1070,11 +1069,7 @@ Start
 		;Bit 3-2 CDAFVR = 2 - DAC fixed voltage is 2.048
 		;Bit 1-0 ADFVR = 2 - ADC fixed voltage is 2.048
 		banksel	FVRCON		;Bank 2
-#ifndef __DEBUG
 		movlw	b'10001010'
-#else
-		movlw	b'10000110'
-#endif
 		movwf	FVRCON
 
 		;Configure the digital to analog converter
@@ -1085,6 +1080,10 @@ Start
 		;Bit 0 DACNSS = 0 - Negative source is Vss
 		movlw	b'11001000'
 		movwf	DACCON0
+
+		;Wait for the Fixed Voltage Reference to be ready
+WaitVoltRef	btfss	FVRCON,FVRRDY
+		bra	WaitVoltRef
 
 		;Configure A/D converter
 		banksel	ADCON0		;Bank 1
@@ -1098,10 +1097,19 @@ Start
 		bsf	PIE2,C2IE	;Enable comparator 2 interrupt
 		bsf	PIE1,TMR2IE	;Enable timer 2 interrupts
 
+		nop			;Delay for the acquisition time
+		nop
 		bsf	ADCON0,GO	;Measure FVR buffer 1
 
+		btfss	FailSafeMode
+		goto	ClearRam
+		movlw	TimeoutStr
+		pcall	PrintStringNL	;Report the WDT reset
+		btfsc	NoThermostat
+		bcf	FailSafeMode	;Disable fail safe mode if no thermostat
+
 		;Clear RAM in bank 0
-		movlw	0
+ClearRam	movlw	0
 		call	ClearRamBank
 		;Clear RAM in bank 1
 		movlw	1
@@ -1140,6 +1148,10 @@ WaitConvert	btfsc	ADCON0,GO	;Check that A/D conversion is finished
 
 		;Configure comparator module
 		pcall	SetupCompModule
+
+		banksel	RCSTA		;Bank 3
+		btfss	FailSafeMode
+		bsf	RCSTA,CREN	;Enable serial receive
 
 		;Configure timer 4
 		banksel	T4CON		;Bank 8
@@ -1264,9 +1276,7 @@ UnknownJump2	movlw	b'111'
 		btfss	FailSafeMode
 		goto	MainLoop
 		movlw	'M'
-		lcall	SwitchOnLED
-		movlw	TimeoutStr
-		pcall	PrintStringNL
+		pcall	SwitchOnLED
 
 ;************************************************************************
 
@@ -1619,14 +1629,14 @@ CheckThermostat	bcf	PIR1,ADIF	;Clear flag for next round
 		subwf	VoltShort,W	;Line shorted?
 		skpnc
 		goto	ShortCircuit	;Heat demand from on/off thermostat
+		movfw	LineVoltage	;Get the A/D result again
+		subwf	VoltLow,W	;Determine the logical line level
+		banksel	onoffflags	;Bank 0
 		btfss	NoThermostat
-		bra	ThermostatRet
+		return
 ;Any opentherm thermostat will always start in low power mode, so we want to
 ;see a low line voltage before considering the thermostat to be reconnected.
-		movfw	LineVoltage	;Get the A/D result again
-		subwf	VoltLow,W	;No short, but logical low level?
-		banksel	onoffflags	;Bank 0
-		skpc
+		skpc			;Logical low level?
 		goto	ThermostatEnd	;Not a logical low opentherm level
 		bcf	NoThermostat	;Thermostat was reconnected
 		bcf	HeatDemand
@@ -1658,7 +1668,6 @@ Disconnect	bsf	NoThermostat	;Thermostat has been disconnected
 		clrf	setpoint2
 		movlw	'P'
 		pcall	SwitchOffLED	;Switch off Raised Power LED
-ThermostatRet
 		banksel	onoffflags
 		return
 Unstable
@@ -1672,6 +1681,7 @@ ThermostatEnd	btfss	MonitorMode	;Can't send messages in monitor mode
 		movwf	byte1
 		clrf	byte3
 		clrf	byte4
+		clrf	originaltype
 		bcf	SendUserMessage
 		call	SelectMessage	;Get a message to send from the table
 		movwf	byte2
@@ -1811,13 +1821,18 @@ PrintError	btfsc	PowerReport	;Pending power change report?
 		btfss	errornum,0
 		call	PrintMessage	;Print message for error 2 and 4.
 		clrf	errornum
-PrintDebug	movfw	debug
+PrintDebug	movfw	DebugPointerL
 		skpnz
 		return
 		movwf	FSR0L
+		movfw	DebugPointerH
+		movwf	FSR0H
 		movfw	INDF0
+		clrf	FSR0H
 		movwf	temp
-		movfw	debug
+		movfw	DebugPointerH
+		call	PrintXChar
+		movfw	DebugPointerL
 		call	PrintHex
 		movlw	'='
 		call	PrintChar
@@ -2221,14 +2236,14 @@ CreateRequest	movfw	byte2
 		skpnz			;Data ID is not known to be unsupported
 		goto	SendAltRequest
 		btfss	AlternativeUsed	;Was the request modified in some way?
-		btfsc	NoThermostat	;Is a thermostat connected?
+SendDefaultMsg	btfsc	NoThermostat	;Is a thermostat connected?
 		goto	SetParity	;Calculate the parity of the new message
 		return			;Send message unmodified to the boiler
 SendAltRequest	bsf	AlternativeUsed	;Probably going to send a different msg
 		bcf	OverrideUsed	;Changes will be more drastic
 		call	Alternative	;Get the alternative message to send
 		btfss	AlternativeUsed
-		return			;There were no other candidates
+		bra	SendDefaultMsg	;There were no other candidates
 		bcf	AlternativeDone
 		movwf	byte2		;Fill in the alternative Message ID
 		call	TreatMessage	;Process the alternative message
@@ -3346,7 +3361,11 @@ SerialCmdTable	goto	SerialCmd00	; AA, MM, TT commands
 		goto	SerialCmd10	; GW, SC, CS commands
 		goto	SerialCmd11	; CR, SB commands
 		goto	SerialCmd12	; FT command
+#ifndef __DEBUG
 		retlw	CommandNG
+#else
+		goto	$		; WD command
+#endif
 		goto	SerialCmd14	; DP command
 		retlw	CommandNG
 		retlw	CommandNG
@@ -3749,7 +3768,7 @@ SetCtrlSetpoint	call	GetPosFloatArg
 SetVentSetpoint	call	GetDecimalArg	;Get the ventilation setpoint
 		skpnc
 		goto	ClrVentSetpoint	;Non-numeric value
-		tstf	INDF0
+		tstf	INDF1
 		skpz
 		retlw	SyntaxError	;Characters following the value
 		sublw	100
@@ -3796,15 +3815,25 @@ StoreTemp	movwf	FSR0L
 		clrf	FSR0H
 		return
 
-SetDebugPtr	movfw	rxpointer
-		sublw	5
-		skpz
-		retlw	SyntaxError
-		call	GetHexArg
+SetDebugPtr	call	CmdArgPointer
+		movfw	rxpointer
+		sublw	5		;Check for 2-digit address
+		skpnz
+		bra	ShortPointer
+		incfsz	WREG,W		;Check for 3-digit address
+		retlw	SyntaxError	;Incorrect command length
+		call	GetHexDigit	;Get the digit for the high byte
 		skpnc
 		return
-		movwf	debug
-		lgoto	PrintHex
+ShortPointer	movwf	DebugPointerH	;Store the high byte
+		call	GetHexadecimal	;Get the low byte
+		skpnc
+		return
+		movwf	DebugPointerL	;Store the low byte
+		movfw	DebugPointerH
+		lcall	PrintXChar
+		movfw	DebugPointerL
+		goto	PrintHex	;Indicate success
 
 SetClock	call	GetDecimalArg	;Get the hours
 		skpnc
@@ -3951,7 +3980,7 @@ SetAlternative	call	GetDecimalArg	;Get the message number
 		return			;Return the error code from GetDecimal
 		skpnz			;Don't allow adding message ID=0 ...
 		retlw	OutOfRange	;... because 0 indicates an empty slot
-		tstf	INDF0		;Is this the end of the command?
+		tstf	INDF1		;Is this the end of the command?
 		skpz
 		retlw	SyntaxError
 		bcf	NoAlternative	;There now is at least one alternative
@@ -3972,7 +4001,7 @@ DelAlternative	call	GetDecimalArg	;Get the message number
 		return			;Return the error code from GetDecimal
 		skpnz			;Don't allow deleting message ID=0 ...
 		retlw	OutOfRange	;... because 0 indicates an empty slot
-		tstf	INDF0		;Is this the end of the command?
+		tstf	INDF1		;Is this the end of the command?
 		skpz
 		retlw	SyntaxError
 		call	DeleteAlt
@@ -4047,17 +4076,10 @@ SetupCompModule	bcf	MonitorMode
 		;Bit 3-2 Unimplemented
 		;Bit 1-0 = 0 - C12IN0- (RA0) / 1 - C12IN1- (RA1)
 		banksel	CM1CON0		;Bank 2
-#ifndef __DEBUG
 		movlw	b'11010000'
 		movwf	CM1CON1
 		movlw	b'11010001'
 		movwf	CM2CON1
-#else
-		movlw	b'11100000'
-		movwf	CM1CON1
-		movlw	b'11100001'
-		movwf	CM2CON1
-#endif
 		movlw	GATEWAYMODE	;Comparator setting for gateway mode
 		btfsc	MonitorMode	;Check which mode to switch to
 		movlw	MONITORMODE	;Comparator setting for monitor mode
@@ -4087,7 +4109,7 @@ SetSensorFuncO	bcf	TempSensorFunc
 SetMaxModLevel	call	GetDecimalArg	;Get the modulation level
 		skpnc
 		goto	ClrMaxModLevel
-		tstf	INDF0
+		tstf	INDF1
 		skpz
 		retlw	SyntaxError
 		sublw	100
@@ -4321,7 +4343,7 @@ ResetCntJump3	movfw	temp
 SetPrioMessage	call	GetDecimalArg	;Get the DataID
 		skpnc
 		return			;No decimal value specified
-		tstf	INDF0		;Is this the end of the command?
+		tstf	INDF1		;Is this the end of the command?
 		skpz
 		retlw	SyntaxError
 		movwf	prioritymsgid
@@ -4361,7 +4383,6 @@ GetDecLoop	movwf	temp
 GetDecReturn	movfw	temp
 		return
 
-GetHexArg	call	CmdArgPointer
 GetHexadecimal	call	GetHexDigit
 		skpnc
 		return
@@ -4717,7 +4738,7 @@ PrintSettingB	de	"B="
 TimeStamp	de	tstamp, 0
 PrintSettingC	de	"C="
 SpeedString	de	mhzstr, " MHz", 0
-ResetReasonStr	de	'W'	;Watchdog timeout
+ResetReasonStr	de	'W'	;Watchdog timer time-out
 		de	'B'	;Brown out (supply voltage dropped below 2.7V)
 		de	'P'	;Power on
 		de	'S'	;BREAK condition on the serial interface
