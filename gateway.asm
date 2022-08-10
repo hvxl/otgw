@@ -5,7 +5,7 @@
 
 #define		version		"6.1"
 #define		phase		"."	;a=alpha, b=beta, .=production
-;#define 	patch		"2"	;Comment out when not applicable
+#define 	patch		"1"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -1055,6 +1055,7 @@ Start
 
 		;Configure the serial interface
 		banksel	SPBRGL		;Bank 3
+		clrf	RCSTA		;Reset the serial port control register
 		movlw	BAUD
 		movwf	SPBRGL
 		bsf	TXSTA,BRGH	;9600 baud
