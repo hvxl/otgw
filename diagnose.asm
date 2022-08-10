@@ -865,7 +865,7 @@ IdlePerBusy	movwf	idleflags
 		movfw	accual
 		subwf	INDF0,W
 		movwf	accual
-		incf	FSR0L
+		incf	FSR0L,F
 		movfw	accuah
 		subwfb	INDF0,W
 		movwf	accuah
