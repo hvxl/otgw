@@ -5,7 +5,7 @@
 
 #define		version		"6.1"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"1"	;Comment out when not applicable
+#define 	patch		"2"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -417,9 +417,9 @@ override	res	1
 ;Bits 0&1 are used as a counter to allow 3 attempts for the override to stick
 
 initflags	res	1
-#define		InitParameter	initflags,0
-#define		InitHotWater	initflags,1
-#define		InitHeating	initflags,2
+#define		InitHotWater	initflags,0	;Must match ID6:HB0
+#define		InitHeating	initflags,1	;Must match ID6:HB1
+#define		InitParameter	initflags,2
 #define		WaterSetpoint	initflags,3
 #define		MaxHeatSetpoint	initflags,4
 #define		NoResetUnknown	initflags,6
@@ -1179,6 +1179,8 @@ WaitConvert	btfsc	ADCON0,GO	;Check that A/D conversion is finished
 		btfss	FailSafeMode
 		bsf	INTCON,GIE
 		comf	alternativecmd,F;Compensate for initial increment
+		;Some boilers support MsgID 48 and/or MsgID 49, while they
+		;don't support MsgID 6 (For example: Bosch HRC 30)
 		movlw	b'111'
 		movwf	initflags	;Nothing has been initialized yet
 		movlw	MIN_DHWSETPOINT
@@ -2675,20 +2677,20 @@ MessageID5	btfsc	MsgResponse	;Only interested in requests
 ;the gateway will simulate read access.
 MessageID6	btfss	MsgResponse
 		return
-		bcf	InitParameter
 		clrw			;Assume no support for remote-parameters
 		btfss	byte1,5
 		btfsc	byte1,4
-		goto	parameterupdate
+		goto	parameterupdate	;No ReadAck
+		movfw	byte3		;Get the remote-parameter transfer flags
+		iorlw	~b'11'		;Only consider the DHW and max CH flags
+		btfsc	InitParameter	;Parameter initialization already done?
+		andwf	initflags,F	;Don't request unsupported parameters
 		movfw	byte4		;Get the remote-parameter r/w flags
 parameterupdate	xorwf	onoffflags,W
 		andlw	b'11'
 		xorwf	onoffflags,F
 		call	messageack	;Turn request into acknowledgement
-		btfss	dhwupdate
-		bcf	InitHotWater	;Boiler doesn't allow DHW setpt update
-		btfss	maxchupdate
-		bcf	InitHeating	;Boiler doesn't allow MaxCH setpt update
+		bcf	InitParameter	;Parameter initialization started
 		movfw	byte3
 		iorlw	b'11'		;The gateway will simulate read access
 		goto	setbyte3
