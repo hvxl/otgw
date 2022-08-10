@@ -5,7 +5,7 @@
 
 #define		version		"6.1"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"2"	;Comment out when not applicable
+#define 	patch		"3"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -417,12 +417,12 @@ override	res	1
 ;Bits 0&1 are used as a counter to allow 3 attempts for the override to stick
 
 initflags	res	1
-#define		InitHotWater	initflags,0	;Must match ID6:HB0
-#define		InitHeating	initflags,1	;Must match ID6:HB1
-#define		InitParameter	initflags,2
-#define		WaterSetpoint	initflags,3
-#define		MaxHeatSetpoint	initflags,4
-#define		NoResetUnknown	initflags,6
+#define		InitHotWater	initflags,0	;Must match ID6:HB0 and ID % 8
+#define		InitHeating	initflags,1	;Must match ID6:HB1 and ID % 8
+#define		NoResetUnknown	initflags,3
+#define		WaterSetpoint	initflags,4	;Must match ID % 8 (swapped)
+#define		MaxHeatSetpoint	initflags,5	;Must match ID % 8 (swapped)
+#define		InitParameter	initflags,6	;Must match ID % 8 (6)
 #define		PriorityMsg	initflags,7
 
 onoffflags	res	1			;General bit flags
@@ -1181,7 +1181,7 @@ WaitConvert	btfsc	ADCON0,GO	;Check that A/D conversion is finished
 		comf	alternativecmd,F;Compensate for initial increment
 		;Some boilers support MsgID 48 and/or MsgID 49, while they
 		;don't support MsgID 6 (For example: Bosch HRC 30)
-		movlw	b'111'
+		movlw	b'01000011'
 		movwf	initflags	;Nothing has been initialized yet
 		movlw	MIN_DHWSETPOINT
 		movwf	dhwsetpointmin
@@ -2274,7 +2274,7 @@ MsgUnsupported	movfw	byte2		;Get the message ID
 		pcall	DeleteAlt	;Remove from the list of alternatives
 		goto	HandleRespJump
 MsgSupported	xorlw	-1		;Invert the mask
-		btfss	NoResetUnknown	;Do nothing for administrative requests
+		btfss	NoResetUnknown	;Do nothing for priority requests
 		andwf	INDF0,F		;Reset the failure count
 HandleRespJump	bcf	NoResetUnknown
 		bsf	BoilerResponse
@@ -3044,15 +3044,28 @@ MandatoryID	btfsc	MsgResponse	;Only interested in requests
 
 Alternative	movlw	T_READ		;Alternative is probably a read command
 		movwf	byte1
-		clrf	byte3		;And a data value of 0
+		clrf	byte3		;With a data value of 0
 		clrf	byte4
-		tstf	initflags
+InitCmdLoop	lslf	initflags,W	;Check if there are any init messages
 		skpnz
-		goto	GotConfigData
+		goto	SendPriorityMsg
 		;Obtain some parameters from the boiler that are useful for the
 		;internal operation of the gateway.
-		bsf	NoResetUnknown	;Don't whitelist if command succeeds
-		btfsc	InitParameter
+		call	AdminMessages
+		call	UnknownMask2	;MsgID is left in temp2
+		skpz			;Admin message is unknown?
+		goto	InitCmdFound
+		movfw	temp2
+		pcall	BitMask
+		btfsc	temp2,3		;Not MsgID 56 or 57?
+		swapf	WREG,W
+		xorlw	~0		;Invert mask
+		andwf	initflags,F	;Clear the flag for the init message
+		goto	InitCmdLoop	;Find another message
+InitCmdFound	movfw	temp2
+		return
+
+AdminMessages	btfsc	InitParameter
 		retlw	MSG_REMOTEPARAM
 		btfsc	InitHotWater
 		retlw	MSG_DHWBOUNDS
@@ -3062,14 +3075,17 @@ Alternative	movlw	T_READ		;Alternative is probably a read command
 		goto	SetWaterSet
 		btfsc	MaxHeatSetpoint
 		goto	SetHeatingSet
-		btfss	PriorityMsg
+		retlw	0
+
+SendPriorityMsg	btfss	PriorityMsg
 		goto	InitDone
-		movfw	TSPIndex
+		bsf	NoResetUnknown	;Don't whitelist if command succeeds
+		movfw	TSPIndex	;This is 0 when not requesting TSPs
 		movwf	byte3
 		movfw	prioritymsgid
 		return
 InitDone	clrf	initflags
-GotConfigData	movfw	resetflags	;Check for pending reset requests
+		movfw	resetflags	;Check for pending reset requests
 		skpz
 		goto	ResetCommand	;Send a reset command
 		btfsc	NoAlternative
@@ -3119,8 +3135,7 @@ ResetCmdJump	rlf	temp,F		;Shift the mask one position
 UnknownMask	movfw	byte2
 UnknownMask2	movwf	temp2
 		rrf	temp2,W
-		movwf	temp
-		rrf	temp,W
+		rrf	WREG,W
 		andlw	b'00011111'	;Get bit 2-7
 		addlw	unknownmap
 		movwf	FSR0L		;Pointer into the map of unknown ID's
@@ -4221,9 +4236,7 @@ UnknownDataID	call	GetDecimalArg	;Get the DataID
 		pcall	UnknownMask2	;Get mask and pointer into unknownmap
 		iorwf	INDF0,F		;Mark message as unsupported
 		movfw	float1
-		call	BitMask
-		addlw	UnknownFlags
-		pcall	ReadEpromData
+		call	GetUnknownFlags
 		iorwf	temp,W
 StoreDataIdMask	call	StoreEpromData	;Update non-volatile storage
 		movfw	float1
@@ -4243,26 +4256,29 @@ KnownDataID	call	GetDecimalArg	;Get the DataID
 		xorlw	-1		;Invert the mask
 		andwf	INDF0,F		;Mark message as supported
 		movfw	float1
-		call	BitMask
-		addlw	UnknownFlags
-		pcall	ReadEpromData
+		call	GetUnknownFlags
 		comf	temp,F
 		andwf	temp,W
 		goto	StoreDataIdMask
+
+GetUnknownFlags	call	BitMask
+		movwf	temp
+		swapf	temp2,F
+		rlf	temp2,W		;Move MSB into carry
+		rlf	temp2,W		;Swap + rol => ror 3
+		andlw	b'11111'	;Top 3 bits contain garbage
+		addlw	UnknownFlags
+		pcall	ReadEpromData
+		return
 
 BitMask		movwf	temp2
 		movlw	b'1'
 		btfsc	temp2,1
 		movlw	b'100'
-		movwf	temp
 		btfsc	temp2,0
-		lslf	temp,F
+		lslf	WREG,F
 		btfsc	temp2,2
-		swapf	temp,F
-		swapf	temp2,F
-		rlf	temp2,W
-		rlf	temp2,W
-		andlw	b'11111'
+		swapf	WREG,W
 		return
 
 ;There have been reports that some equipment does not produce clean transitions

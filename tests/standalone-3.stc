@@ -1,0 +1,14 @@
+test "Unsupported init commands"
+
+load boiler.stc
+# Boiler does not support max CHsetpoint transfer
+Boiler.response = 0xC0060101
+
+# Disconnect the thermostat
+Thermostat.mode = off
+
+go 30000000
+check R00060000
+check R00300000
+# MessageID 49 should not be sent
+check R80310000 {}
