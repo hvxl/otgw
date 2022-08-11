@@ -5,7 +5,7 @@
 
 #define		version		"6.1"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"3"	;Comment out when not applicable
+#define 	patch		"4"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -2500,6 +2500,8 @@ setbyte3	xorwf	byte3,W		;Check if the byte is different
 		xorwf	byte3,F		;Set the byte
 		retlw	0
 
+missingclock	btfss	byte1,5		;Slave didn't provide information?
+		return			;Use response from the slave
 missingdata	btfss	originaltype,4	;On a write, acknowledge received data
 		goto	messageinv	;On a read, return: data invalid
 		call	messageack
@@ -2809,7 +2811,7 @@ roomsetptreset	clrf	override	;Stop requesting a setpoint override
 MessageID20	btfss	MsgResponse
 		return			;No need to process a request
 		btfsc	InvalidTime	;Is the clock value valid?
-		goto	missingdata	;Handle absence of referenced data
+		goto	missingclock	;Handle absence of time & day data
 		call	messageack	;Turn request into acknowledgement
 		movfw	clock1
 		call	setbyte3
