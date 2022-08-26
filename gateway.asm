@@ -5,7 +5,7 @@
 
 #define		version		"6.1"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"4"	;Comment out when not applicable
+#define 	patch		"5"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -349,6 +349,7 @@ dhwsetpointmin	res	1
 dhwsetpointmax	res	1
 chsetpointmin	res	1
 chsetpointmax	res	1
+requestcode	res	1
 minutetimer	res	1
 #define		Expired		minutetimer,7
 
@@ -417,13 +418,15 @@ override	res	1
 ;Bits 0&1 are used as a counter to allow 3 attempts for the override to stick
 
 initflags	res	1
-#define		InitHotWater	initflags,0	;Must match ID6:HB0 and ID % 8
-#define		InitHeating	initflags,1	;Must match ID6:HB1 and ID % 8
-#define		NoResetUnknown	initflags,3
-#define		WaterSetpoint	initflags,4	;Must match ID % 8 (swapped)
-#define		MaxHeatSetpoint	initflags,5	;Must match ID % 8 (swapped)
-#define		InitParameter	initflags,6	;Must match ID % 8 (6)
-#define		PriorityMsg	initflags,7
+;----- initflags bits -------------------------------------------------
+INITHW		equ	0	;InitHotWater	;Must match ID6:HB0
+INITCH		equ	1	;InitHeating	;Must match ID6:HB1
+INITRP		equ	2	;InitParameter
+INITSW		equ	3	;WaterSetpoint
+INITSH		equ	4	;MaxHeatSetpoint
+INITRR		equ	5	;RemoteReq
+INITNR		equ	6	;NoResetUnknown
+INITPM		equ	7	;PriorityMsg
 
 onoffflags	res	1			;General bit flags
 #define		dhwupdate	onoffflags,0	;Must match ID6:LB0
@@ -1181,7 +1184,7 @@ WaitConvert	btfsc	ADCON0,GO	;Check that A/D conversion is finished
 		comf	alternativecmd,F;Compensate for initial increment
 		;Some boilers support MsgID 48 and/or MsgID 49, while they
 		;don't support MsgID 6 (For example: Bosch HRC 30)
-		movlw	b'01000011'
+		movlw	(1 << INITRP) | (1 << INITHW) | (1 << INITCH)
 		movwf	initflags	;Nothing has been initialized yet
 		movlw	MIN_DHWSETPOINT
 		movwf	dhwsetpointmin
@@ -2258,7 +2261,7 @@ HandleResponse	bsf	BoilerAlive	;Received a message from the boiler
 		movfw	byte2
 		xorwf	prioritymsgid,W	;Response matches ID of priority msg?
 		skpnz
-		bcf	PriorityMsg	;Priority message answered
+		bcf	initflags,INITPM;Priority message answered
 		btfss	byte1,4		;For Read-Ack messages, ...
 		call	StoreValue	;... store the value from the boiler
 		call	UnknownMask	;Check boiler support for the DataID
@@ -2274,9 +2277,9 @@ MsgUnsupported	movfw	byte2		;Get the message ID
 		pcall	DeleteAlt	;Remove from the list of alternatives
 		goto	HandleRespJump
 MsgSupported	xorlw	-1		;Invert the mask
-		btfss	NoResetUnknown	;Do nothing for priority requests
+		btfss	initflags,INITNR;Do nothing for priority requests
 		andwf	INDF0,F		;Reset the failure count
-HandleRespJump	bcf	NoResetUnknown
+HandleRespJump	bcf	initflags,INITNR
 		bsf	BoilerResponse
 		btfsc	Unsolicited
 		goto	RemoteCommand
@@ -2565,7 +2568,7 @@ statusreturn	btfsc	byte1,5
 		bsf	BoilerFault	;Remember a fault was reported
 		movlw	MSG_FAULTCODE	;ASF-flags/OEM-fault-code message
 		movwf	prioritymsgid	;Schedule request for more information
-		bsf	PriorityMsg
+		bsf	initflags,INITPM
 statusmaint	movlw	'M'
 		call	SwitchLED	;Update the maintenance LED
 		movfw	byte4
@@ -2654,6 +2657,11 @@ BrandDetect	btfsc	byte3,0		;Smart power bit
 ;20 to specify a remote setpoint override.
 MessageID4	btfss	MsgResponse
 		return			;Don't modify requests
+		movwf	requestcode
+		subwf	byte3,W
+		skpz			;Response matches code requested?
+		btfsc	byte1,5		;Read Ack or Write Ack?
+		bcf	initflags,INITRR;No pending remote request
 		movlw	RCMD_TELEFOON	;Check for the celcia override request
 		subwf	byte3,W
 		skpz
@@ -2685,14 +2693,14 @@ MessageID6	btfss	MsgResponse
 		goto	parameterupdate	;No ReadAck
 		movfw	byte3		;Get the remote-parameter transfer flags
 		iorlw	~b'11'		;Only consider the DHW and max CH flags
-		btfsc	InitParameter	;Parameter initialization already done?
+		btfsc	initflags,INITRP;Parameter initialization already done?
 		andwf	initflags,F	;Don't request unsupported parameters
 		movfw	byte4		;Get the remote-parameter r/w flags
 parameterupdate	xorwf	onoffflags,W
 		andlw	b'11'
 		xorwf	onoffflags,F
 		call	messageack	;Turn request into acknowledgement
-		bcf	InitParameter	;Parameter initialization started
+		bcf	initflags,INITRP;Parameter initialization started
 		movfw	byte3
 		iorlw	b'11'		;The gateway will simulate read access
 		goto	setbyte3
@@ -2847,7 +2855,7 @@ MessageID28	btfsc	MsgResponse	;Do not modify a request
 ;Keep track of the boundaries for domestic hot water reported by the boiler
 MessageID48	btfss	MsgResponse
 		return
-		bcf	InitHotWater	;Received Hot Water Boundaries response
+		bcf	initflags,INITHW;Received Hot Water Boundaries response
 		btfsc	byte1,5		;DataInvalid Or UnknownDataID?
 		goto	WordResponse	;Ignore bad responses
 		movfw	byte3
@@ -2859,7 +2867,7 @@ MessageID48	btfss	MsgResponse
 ;Keep track of the boundaries for central heating reported by the boiler
 MessageID49	btfss	MsgResponse
 		return
-		bcf	InitHeating	;Received Heating Boundaries response
+		bcf	initflags,INITCH;Received Heating Boundaries response
 		btfsc	byte1,5		;DataInvalid Or UnknownDataID?
 		goto	WordResponse	;Ignore bad responses
 		movfw	byte3
@@ -2873,7 +2881,7 @@ MessageID56	btfsc	MsgResponse
 		goto	hotwaterreturn
 		tstf	dhwsetpoint1	;Check if a setpoint has been specified
 		btfss	byte1,4		;Change on WriteData
-		btfsc	WaterSetpoint	;Or new setpoint
+		btfsc	initflags,INITSW;Or new setpoint
 		skpnz			;And a setpoint exists
 		return			;Continue with normal processing
 SetWaterSet	movlw	T_WRITE
@@ -2883,7 +2891,7 @@ SetWaterSet	movlw	T_WRITE
 		movfw	dhwsetpoint2
 		call	setbyte4	;Load the data value low byte
 		retlw	MSG_DHWSETPOINT	;Return MsgID when used as alternative
-hotwaterreturn	bcf	WaterSetpoint
+hotwaterreturn	bcf	initflags,INITSW
 		btfss	byte1,5
 		return
 		btfss	byte1,4
@@ -2908,7 +2916,7 @@ MessageID57	btfsc	MsgResponse
 		goto	maxchsetptret
 		tstf	maxchsetpoint1	;Check if a setpoint has been specified
 		btfss	byte1,4		;Change on WriteData
-		btfsc	MaxHeatSetpoint	;Or new setpoint
+		btfsc	initflags,INITSH;Or new setpoint
 		skpnz			;And a setpoint exists
 		return			;Continue with normal processing
 SetHeatingSet	movlw	T_WRITE
@@ -2918,7 +2926,7 @@ SetHeatingSet	movlw	T_WRITE
 		movfw	maxchsetpoint2
 		call	setbyte4	;Load the data value low byte
 		retlw	MSG_MAXCHSETPOINT ;Return MsgID when used as alternative
-maxchsetptret	bcf	MaxHeatSetpoint
+maxchsetptret	bcf	initflags,INITSH
 		btfss	byte1,5
 		return			;Boiler was happy with the message
 		btfss	byte1,4
@@ -3022,7 +3030,7 @@ TSPBufferSize	btfss	MsgResponse	;Only interested in responses
 		movwf	TSPCount	;Store the number of entries
 		incf	byte2,W		;Reading entries is the next MsgID
 		movwf	prioritymsgid	;Start reading entries
-		bsf	PriorityMsg
+		bsf	initflags,INITPM
 		return
 
 TSPReadEntry	btfsc	MsgResponse	;Only interested in responses ...
@@ -3032,7 +3040,7 @@ TSPReadEntry	btfsc	MsgResponse	;Only interested in responses ...
 		movfw	TSPCount
 		subwf	TSPIndex,W	;Check if more entries exist
 		skpc
-		bsf	PriorityMsg	;Prepare to read next entry
+		bsf	initflags,INITPM;Prepare to read next entry
 		return
 
 ;Remove blacklisting for special DataIDs. Do this when receiving a request, so
@@ -3053,35 +3061,42 @@ InitCmdLoop	lslf	initflags,W	;Check if there are any init messages
 		goto	SendPriorityMsg
 		;Obtain some parameters from the boiler that are useful for the
 		;internal operation of the gateway.
-		call	AdminMessages
-		call	UnknownMask2	;MsgID is left in temp2
+		clrf	tempvar0	;Use for tracking which flag was tested
+		call	AdminMessages	;Select a message
+		call	UnknownMask2	;Check whether the message is unknown
 		skpz			;Admin message is unknown?
 		goto	InitCmdFound
-		movfw	temp2
-		pcall	BitMask
-		btfsc	temp2,3		;Not MsgID 56 or 57?
-		swapf	WREG,W
-		xorlw	~0		;Invert mask
-		andwf	initflags,F	;Clear the flag for the init message
+		comf	tempvar0,W	;Invert the bitmap of tested initflags
+		andwf	initflags,F	;Reset the unknown initflag
 		goto	InitCmdLoop	;Find another message
-InitCmdFound	movfw	temp2
+InitCmdFound	movfw	temp2		;MsgID was left in temp2
 		return
 
-AdminMessages	btfsc	InitParameter
+AdminMessages	bsf	tempvar0,INITRP
+		btfsc	initflags,INITRP
 		retlw	MSG_REMOTEPARAM
-		btfsc	InitHotWater
+		bsf	tempvar0,INITHW
+		btfsc	initflags,INITHW
 		retlw	MSG_DHWBOUNDS
-		btfsc	InitHeating
+		bsf	tempvar0,INITCH
+		btfsc	initflags,INITCH
 		retlw	MSG_MAXCHBOUNDS
-		btfsc	WaterSetpoint
+		bsf	tempvar0,INITSW
+		btfsc	initflags,INITSW
 		goto	SetWaterSet
-		btfsc	MaxHeatSetpoint
+		bsf	tempvar0,INITSH
+		btfsc	initflags,INITSH
 		goto	SetHeatingSet
+		bsf	tempvar0,INITRR
+		btfss	initflags,INITRR
 		retlw	0
+		movfw	requestcode
+		movwf	byte3
+		retlw   MSG_REMOTECMD
 
-SendPriorityMsg	btfss	PriorityMsg
+SendPriorityMsg	btfss	initflags,INITPM
 		goto	InitDone
-		bsf	NoResetUnknown	;Don't whitelist if command succeeds
+		bsf	initflags,INITNR;Don't whitelist if command succeeds
 		movfw	TSPIndex	;This is 0 when not requesting TSPs
 		movwf	byte3
 		movfw	prioritymsgid
@@ -3358,7 +3373,7 @@ SerialCmdSub	movlw	low rxbuffer
 		movfw	temp
 		brw			;Make a quick initial selection
 ; Calculate table index with Tcl: tcl::mathop::^ {*}[scan SB %c%c]
-SerialCmdTable	goto	SerialCmd00	; AA, MM, TT commands
+SerialCmdTable	goto	SerialCmd00	; AA, MM, RR, TT commands
 		goto	SerialCmd01	; RS, SR commands
 		goto	SerialCmd02	; PR, KI commands
 		goto	SerialCmd03	; PS command
@@ -3412,6 +3427,9 @@ SerialCmd00	movfw	INDF1
 		xorlw	'A' ^ 'M'
 		skpnz
 		goto	SetMaxModLevel
+		xorlw	'M' ^ 'R'
+		skpnz
+		goto	RemoteRequest
 		retlw	CommandNG
 
 SerialCmd01	movfw	INDF1
@@ -3740,10 +3758,10 @@ SetHotWaterTemp	call	GetFloatArg
 		skpc
 		goto	HotWaterTempOK
 		retlw	BadValue
-HotWaterReset	bcf	WaterSetpoint
+HotWaterReset	bcf	initflags,INITSW
 		goto	HotWaterFinish
 HotWaterTempOK	btfsc	dhwupdate	;Check if boiler supports write access
-		bsf	WaterSetpoint	;Schedule to send command to the boiler
+		bsf	initflags,INITSW;Schedule to send command to the boiler
 HotWaterFinish	movfw	float2
 		movwf	dhwsetpoint2
 		movfw	float1
@@ -3765,10 +3783,10 @@ SetHeatingTemp	call	GetFloatArg
 		skpc
 		goto	HeatingTempOK
 		retlw	BadValue
-HeatingReset	bcf	MaxHeatSetpoint
+HeatingReset	bcf	initflags,INITSH
 		goto	HeatingFinish
 HeatingTempOK	btfsc	maxchupdate	;Check if boiler supports write access
-		bsf	MaxHeatSetpoint	;Schedule to send command to the boiler
+		bsf	initflags,INITSH;Schedule to send command to the boiler
 HeatingFinish	movfw	float2
 		movwf	maxchsetpoint2
 		movfw	float1
@@ -4368,7 +4386,7 @@ SetPrioMessage	call	GetDecimalArg	;Get the DataID
 		skpz
 		retlw	SyntaxError
 		movwf	prioritymsgid
-		bsf	PriorityMsg
+		bsf	initflags,INITPM
 		clrf	TSPCount
 		clrf	TSPIndex
 		lgoto	PrintByte
@@ -4579,6 +4597,13 @@ SetCtrlSetpt2	call	GetPosFloatArg
 		movfw	float2
 		movwf	controlsetpt4
 		goto	CommandFloat
+
+RemoteRequest	call	GetDecimalArg
+		skpnc
+		return
+		movwf	requestcode
+		bsf	initflags,INITRR
+		goto	PrintByte
 
 ;************************************************************************
 ; Implement the GPIO port functions
