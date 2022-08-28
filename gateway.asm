@@ -5,7 +5,7 @@
 
 #define		version		"6.1"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"6"	;Comment out when not applicable
+#define 	patch		"7"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -1064,6 +1064,13 @@ Start
 		movlw	b'110001'
 		movwf	T1CON
 
+		;Delay a few milliseconds to show the lit LEDs
+		clrf	TMR0
+		bcf	INTCON,TMR0IF
+WaitTimer0	clrwdt
+		btfss	INTCON,TMR0IF
+		goto	WaitTimer0
+
 		;Configure the serial interface
 		banksel	SPBRGL		;Bank 3
 		clrf	RCSTA		;Reset the serial port control register
@@ -1207,13 +1214,6 @@ WaitConvert	btfsc	ADCON0,GO	;Check that A/D conversion is finished
 		bsf	SysMaxModLevel	;No user defined max modulation
 		bsf	SysCoolLevel	;No user defined cooling level
 		bsf	SysCH2Setpoint	;No user defined CH2 control setpoint
-
-		;Delay a few milliseconds to show the lit LEDs
-		clrf	TMR0
-		bcf	INTCON,TMR0IF
-WaitTimer0	clrwdt
-		btfss	INTCON,TMR0IF
-		goto	WaitTimer0
 
 		bsf	InvalidTime
 
