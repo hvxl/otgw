@@ -5,7 +5,7 @@
 
 #define		version		"6.1"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"5"	;Comment out when not applicable
+#define 	patch		"6"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -333,8 +333,13 @@ maxchsetpoint1	res	1
 maxchsetpoint2	res	1
 controlsetpt1	res	1
 controlsetpt2	res	1
+#define		SysCtrlSetpoint	controlsetpt1,7
 controlsetpt3	res	1	;Control Setpoint for CH2 high byte
 controlsetpt4	res	1	;Control Setpoint for CH2 low byte
+#define		SysCH2Setpoint	controlsetpt3,7
+coolinglevel1	res	1
+coolinglevel2	res	1
+#define		SysCoolLevel	coolinglevel1,7
 ventsetpoint	res	1
 DebugPointerL	res	1
 DebugPointerH	res	1
@@ -361,6 +366,7 @@ RemOverrideFunc	res	1
 #define		TempChangePrio	RemOverrideFunc,5
 
 MaxModLevel	res	1
+#define		SysMaxModLevel	MaxModLevel,7
 GPIOFunction	res	1			;Funtions assigned to GPIO pins
 
 flags		res	1			;General bit flags
@@ -435,15 +441,17 @@ onoffflags	res	1			;General bit flags
 #define		HeatDemand	onoffflags,3
 #define		ReturnInvalid	onoffflags,4
 #define		SendUserMessage	onoffflags,5	;User message in standalone mode
-#define		UserMaxModLevel	onoffflags,6
 #define		OneSecond	onoffflags,7	;Time to send the next message
 
+statusflags	res	1			;Master status flags
+#define		CHModeOff	statusflags,0	;Must match ID0:HB0
+#define		CoolModeOff	statusflags,2	;Must match ID0:HB2
+#define		CH2ModeOff	statusflags,4	;Must match ID0:HB4
+
 gpioflags	res	1			;General bit flags
-#define		CHModeOff	gpioflags,0	;Must match ID0:HB0
 #define		VirtualLedE	gpioflags,1	;Must be bit 1
 #define		VirtualLedF	gpioflags,2	;Must be bit 2
 #define		gpioaway	gpioflags,3
-#define		CH2ModeOff	gpioflags,4	;Must match ID0:HB4
 #define		gpio_port1	gpioflags,6	;Must match PORTA,6
 #define		gpio_port2	gpioflags,7	;Must match PORTA,7
 #define		gpio_mask	gpioflags
@@ -1195,6 +1203,11 @@ WaitConvert	btfsc	ADCON0,GO	;Check that A/D conversion is finished
 		movlw	MAX_CHSETPOINT
 		movwf	chsetpointmax
 
+		bsf	SysCtrlSetpoint	;No user defined control setpoint
+		bsf	SysMaxModLevel	;No user defined max modulation
+		bsf	SysCoolLevel	;No user defined cooling level
+		bsf	SysCH2Setpoint	;No user defined CH2 control setpoint
+
 		;Delay a few milliseconds to show the lit LEDs
 		clrf	TMR0
 		bcf	INTCON,TMR0IF
@@ -1529,8 +1542,7 @@ FlashTimer	bcf	PIR1,TMR1IF	;Clear timer overrun flag
 CommandExpiry	decfsz	minutetimer,F	;Count down the expiry timer
 		return			;Timer has not expired
 		bsf	InvalidTime	;Mark the time as invalid
-		clrf	controlsetpt1	;Clear the control setpoint
-		clrf	controlsetpt2
+		bsf	SysCtrlSetpoint	;Invalidate the control setpoint
 		return
 
 SummaryReport	movfw	txavailable	;Check if space is available in buffer
@@ -2363,7 +2375,7 @@ messagetable	goto	MessageID0	;Data ID 0
 		goto	MessageID4	;Data ID 4
 		goto	MessageID5	;Data ID 5
 		goto	MessageID6	;Data ID 6
-		goto	FakeResponse	;Data ID 7
+		goto	MessageID7	;Data ID 7
 		goto	MessageID8	;Data ID 8
 		goto	MessageID9	;Data ID 9
 		goto	TSPBufferSize	;Data ID 10
@@ -2530,29 +2542,25 @@ setbyte4	xorwf	byte4,W		;Check if the byte is different
 MessageID0	btfsc	MsgResponse	;Status request or response?
 		goto	statusreturn
 readstatus	call	MandatoryID	;Remove any blacklisting for the DataID
-		comf	gpioflags,W
-		iorlw	b'11101110'	;Mask off CHModeOff and CH2ModeOff
+		comf	statusflags,W
+		iorlw	b'11101010'	;Mask off CHMode, Cooling, and CH2Mode
 		btfss	HotWaterEnable
 		andlw	b'11111101'	;Domestic hot water enable off
 		movwf	temp		;Used as bit values
 		clrw			;Used as mask
-		tstf	controlsetpt1
-		skpnz
-		tstf	controlsetpt2
-		skpnz
+		btfsc	SysCtrlSetpoint
 		btfsc	HeatDemand
 		iorlw	1 << 0		;Enable central heating mode
 		btfsc	HotWaterSwitch
 		iorlw	1 << 1		;Manipulate hot water enable
-		tstf	controlsetpt3
-		skpnz
-		tstf	controlsetpt4
-		skpz
+		btfss	SysCoolLevel
+		iorlw	1 << 2		;Manipulate cooling enable
+		btfss	SysCH2Setpoint
 		iorlw	1 << 4		;Enable central heating mode 2
 		andwf	temp,F		;Keep the bits that match the mask
 		xorlw	-1		;Invert the mask
 		andwf	byte3,W		;Drop the bits to be replaced
-		iorwf	temp,w		;Fill in the modified bits
+		iorwf	temp,W		;Fill in the modified bits
 		goto	setbyte3
 
 statusreturn	btfsc	byte1,5
@@ -2596,15 +2604,13 @@ statusmaint	movlw	'M'
 MessageID1	btfsc	MsgResponse	;Request or response?
 		goto	ctrlsetptreturn
 		call	MandatoryID	;Prevent the DataID getting blacklisted
-		movfw	controlsetpt1	;Check if a setpoint has been specified
-		iorwf	controlsetpt2,W
 		btfss	NoThermostat	;Always modify if running stand-alone
 		btfsc	AlternativeUsed	;Always modify if this is an alternative
 		goto	ctrlsetptchange
-		skpnz
+		btfsc	SysCtrlSetpoint
 		return			;Continue with normal processing
 ctrlsetptchange	bsf	MsgWriteOp	;TSet must be a WriteData request
-		skpnz			;Use user specified value
+		btfsc	SysCtrlSetpoint	;Use user specified value
 		btfss	HeatDemand	;Check if line is short-circuited
 		goto	ctrlsetptuser
 ctrlsetptmax	movfw	maxchsetpoint1	;Did the user specify a max setpoint?
@@ -2613,15 +2619,17 @@ ctrlsetptmax	movfw	maxchsetpoint1	;Did the user specify a max setpoint?
 		call	setbyte3	;Specify the desired control setpoint
 		movfw	maxchsetpoint2
 		goto	setbyte4
-ctrlsetptuser	movfw	controlsetpt1
+ctrlsetptuser	clrw
+		btfss	SysCtrlSetpoint
+		movfw	controlsetpt1
 		call	setbyte3	;Specify the desired control setpoint
+		btfss	SysCtrlSetpoint
 		movfw	controlsetpt2
 		goto	setbyte4
 
 ctrlsetptreturn	btfss	byte1,5		;Received Data-Invalid response?
 		return			;Setpoint acknowledged by boiler
-		clrf	controlsetpt1	;Zap the invalid value
-		clrf	controlsetpt2
+		bsf	SysCtrlSetpoint	;Zap the invalid value
 		return
 
 ;DataID 2: Master Configuration
@@ -2705,12 +2713,18 @@ parameterupdate	xorwf	onoffflags,W
 		iorlw	b'11'		;The gateway will simulate read access
 		goto	setbyte3
 
+MessageID7	btfss	MsgResponse	;Don't modify responses
+		btfsc	SysCoolLevel	;User provided cooling level?
+		return
+		bsf	MsgWriteOp	;CoolingControl is a WriteData request
+		movfw	coolinglevel1
+		call	setbyte3
+		movfw	coolinglevel2
+		goto	setbyte4
+		
 MessageID8	btfsc	MsgResponse
 		goto	FakeResponse
-		movfw	controlsetpt3	;Check if a setpoint has been specified
-		skpnz
-		tstf	controlsetpt4
-		skpnz
+		btfsc	SysCH2Setpoint	;Check if a setpoint has been specified
 		btfsc	AlternativeUsed	;Always modify if this is an alternative
 		goto	MsgID8Change
 		return
@@ -2745,7 +2759,7 @@ MsgID9Change	call	messageack	;Turn request into acknowledgement
 MessageID14	btfsc	MsgResponse	;Status request or response?
 		return
 		call	MandatoryID	;Prevent the DataID getting blacklisted
-		btfss	UserMaxModLevel
+		btfsc	SysMaxModLevel
 		btfsc	AlternativeUsed	;Always modify if this is an alternative
 		goto	MsgId14Change
 		btfss	NoThermostat
@@ -3369,7 +3383,7 @@ SerialCmdSub	movlw	low rxbuffer
 		movwf	temp		;Save for later use
 		andlw	~b'11111'	;First quick check for a valid command
 		skpz
-		goto	SerialCmdCH2
+		goto	SerialCmdCH2	; C2, H2 commands
 		movfw	temp
 		brw			;Make a quick initial selection
 ; Calculate table index with Tcl: tcl::mathop::^ {*}[scan SB %c%c]
@@ -3379,7 +3393,7 @@ SerialCmdTable	goto	SerialCmd00	; AA, MM, RR, TT commands
 		goto	SerialCmd03	; PS command
 		goto	SerialCmd04	; VR, SW commands
 		goto	SerialCmd05	; DA, GB, VS commands
-		goto	SerialCmdGPIO	; GA command
+		goto	SerialCmd06	; CE, GA commands
 		goto	SerialCmd07	; OH, TS commands
 		goto	SerialCmdLED	; LD command
 		goto	SerialCmdLED	; LE command
@@ -3392,7 +3406,7 @@ SerialCmdTable	goto	SerialCmd00	; AA, MM, RR, TT commands
 		retlw	CommandNG
 #endif
 		goto	SerialCmdLED	; LB command
-		goto	SerialCmdLED	; LC command
+		goto	SerialCmd0F	; CL, LC commands
 		goto	SerialCmd10	; GW, SC, CS commands
 		goto	SerialCmd11	; CR, SB commands
 		goto	SerialCmd12	; FT command
@@ -3474,6 +3488,12 @@ SerialCmd05	movfw	INDF1
 		goto	SetVentSetpoint
 		goto	SerialCmdGPIO
 
+SerialCmd06	movfw	INDF1
+		xorlw	'C'
+		skpnz
+		goto	SetCoolEnable
+		goto	SerialCmdGPIO
+
 SerialCmd07	movfw	INDF1
 		xorlw	'O'
 		skpnz
@@ -3487,6 +3507,12 @@ SerialCmd0B	movfw	INDF1
 		skpnz
 		goto	SetCentralHeat
 		retlw	CommandNG
+
+SerialCmd0F	movfw	INDF1
+		xorlw	'C'
+		skpnz
+		goto	SetCoolLevel
+		goto	SerialCmdLED
 
 SerialCmd10	movfw	INDF1
 		xorlw	'S'
@@ -3793,12 +3819,15 @@ HeatingFinish	movfw	float2
 		movwf	maxchsetpoint1
 		goto	CommandFloat
 
-SetCtrlSetpoint	call	GetPosFloatArg
+SetCtrlSetpoint	call	GetPercentArg
 		skpnc
 		return
 		movwf	controlsetpt1
 		movfw	float2
 		movwf	controlsetpt2
+		iorwf	float1,W
+		skpnz
+		bsf	SysCtrlSetpoint	;No user defined control setpoint
 		movlw	120
 		movwf	minutetimer
 		goto	CommandFloat
@@ -3820,11 +3849,12 @@ ClrVentSetpoint	clrf	ventsetpoint
 
 SetOutsideT	call	GetFloatArg
 		skpnc
-		return
+		bra	ClrOutsideT
 		btfss	float1,7	;Temperature value negative?
 		btfss	float1,6	;Temperature higher than 64 degrees?
 		goto	StoreOutsideT
-		bcf	OutsideTemp	;No (reasonable) outside temperature
+;		retlw	OutOfRange	;Value must be in the range -40..64
+ClrOutsideT	bcf	OutsideTemp	;No (reasonable) outside temperature
 ValueCleared	movlw	'-'
 		lgoto	PrintChar
 StoreOutsideT	call	StoreOutTemp
@@ -3979,6 +4009,26 @@ SetVoltageRef	movfw	rxpointer
 		movwf	settings
 		call	SaveSettings
 		lgoto	PrintRefVoltage
+
+SetCoolEnable	call	CheckBoolean
+		skpc
+		return
+		bcf	CoolModeOff
+		skpnz
+		bsf	CoolModeOff
+		goto	GoPrintDigit
+
+SetCoolLevel	call	GetPercentArg
+		skpndc
+		goto	ClrCoolLevel
+		skpnc
+		return
+		movwf	coolinglevel1
+		movfw	float2
+		movwf	coolinglevel2
+		goto	CommandFloat
+ClrCoolLevel	bsf	SysCoolLevel
+		goto	ValueCleared
 
 SaveConfig	movfw	conf
 		movwf	temp
@@ -4153,11 +4203,10 @@ SetMaxModLevel	call	GetDecimalArg	;Get the modulation level
 		sublw	100
 		skpc
 		retlw	OutOfRange
-		bsf	UserMaxModLevel
 		sublw	100
 		movwf	MaxModLevel
 		lgoto	PrintByte
-ClrMaxModLevel	bcf	UserMaxModLevel
+ClrMaxModLevel	bsf	SysMaxModLevel
 		movlw	100
 		movwf	MaxModLevel
 		goto	ValueCleared
@@ -4451,6 +4500,21 @@ GetHexDigitNum	addlw	10
 		clrc
 		return
 
+GetPercentArg	call	GetPosFloatArg
+		setdc			;DC indicates bad floating point value
+		skpnc
+		return
+		addlw	-100
+		clrdc
+		skpc
+		goto	ReturnFloatArg	;Value is below 100
+		skpz
+		retlw	OutOfRange	;Value is above 100
+		tstf	float2
+		skpz
+		retlw	OutOfRange	;Value is 100 + some fraction
+		goto	ReturnFloatArg	;Value is exacly 100.0
+
 GetPosFloatArg	call	CmdArgPointer
 		movfw	INDF1
 		sublw	'-'
@@ -4516,6 +4580,7 @@ GetFloatWrapUp	clrf	float2
 		movwf	float2
 		movfw	temp
 		movwf	float1
+ReturnFloatArg	movfw	float1
 		skpnz
 		tstf	float2		;Z bit indicates if float value is 0.0
 		clrc
@@ -4590,12 +4655,15 @@ SetCentralHeat2	call	CheckBoolean
 		bsf	CH2ModeOff
 		goto	GoPrintDigit
 
-SetCtrlSetpt2	call	GetPosFloatArg
+SetCtrlSetpt2	call	GetPercentArg
 		skpnc
 		return
 		movwf	controlsetpt3
 		movfw	float2
 		movwf	controlsetpt4
+		iorwf	float1,W
+		skpnz
+		bsf	SysCH2Setpoint	;No user defined control setpoint
 		goto	CommandFloat
 
 RemoteRequest	call	GetDecimalArg
