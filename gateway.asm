@@ -60,7 +60,8 @@
 ;SW=60.0	Set the domestic hot water setpoint.
 ;SC=14:45/6	Set the clock and the day of the week, 1 = Monday, 7 = Sunday
 ;VR=3		Adjust the reference voltage between 0.6V and 2.5V
-;HW=1		Control DHW. Use T or A to let the thermostat control DHW.
+;HW=1		Control DHW. P to start manual DHW push.
+;		Use T or A to let the thermostat control DHW.
 ;LA=F		Configure the function for LED A, defaults to Flame on
 ;LB=X		Configure the function for LED B, defaults to Transmitting
 ;LC=O		Configure the function for LED C, defaults to Setpoint Override
@@ -249,6 +250,7 @@ include		<coff.inc>
 		constant MSG_MAXCHBOUNDS=49
 		constant MSG_DHWSETPOINT=56
 		constant MSG_MAXCHSETPOINT=57
+		constant MSG_OPERMODES=99
 		constant MSG_FUNCOVERRIDE=100
 
 ;Opentherm remote requests
@@ -355,6 +357,9 @@ dhwsetpointmax	res	1
 chsetpointmin	res	1
 chsetpointmax	res	1
 requestcode	res	1
+operatingmode1	res	1
+operatingmode2	res	1
+#define		manualdhwpush	operatingmode1,4;Manual DHW push requested
 minutetimer	res	1
 #define		Expired		minutetimer,7
 
@@ -431,8 +436,8 @@ INITRP		equ	2	;InitParameter
 INITSW		equ	3	;WaterSetpoint
 INITSH		equ	4	;MaxHeatSetpoint
 INITRR		equ	5	;RemoteReq
-INITNR		equ	6	;NoResetUnknown
-INITPM		equ	7	;PriorityMsg
+INITOM		equ	6	;OperModes
+INITNR		equ	7	;NoResetUnknown
 
 onoffflags	res	1			;General bit flags
 #define		dhwupdate	onoffflags,0	;Must match ID6:LB0
@@ -462,6 +467,15 @@ remehaflags	res	1
 #define		TStatISense	remehaflags,6	;Thermostat is Remeha iSense
 #define		TStatCelcia	remehaflags,5	;Thermostat is Remeha Celcia 20
 #define		TStatManual	remehaflags,4	;Thermostat model set manually
+
+dhwpushflags	res	1
+#define		dhwpushstarted	dhwpushflags,3
+#define		dhwpushspoof	dhwpushflags,4
+#define		dhwpushpending	dhwpushflags,5
+#define		dhwpushinit	dhwpushflags,6
+#define		opermodewrite	dhwpushflags,7
+
+;Bits 0..2 are used as a counter to allow 8 attempts for the override to stick
 
 errornum	res	1
 errortimer	res	1
@@ -1199,7 +1213,7 @@ WaitConvert	btfsc	ADCON0,GO	;Check that A/D conversion is finished
 		comf	alternativecmd,F;Compensate for initial increment
 		;Some boilers support MsgID 48 and/or MsgID 49, while they
 		;don't support MsgID 6 (For example: Bosch HRC 30)
-		movlw	(1 << INITRP) | (1 << INITHW) | (1 << INITCH)
+		movlw	(1 << INITRP) | (1 << INITHW) | (1 << INITCH) | (1 << INITOM)
 		movwf	initflags	;Nothing has been initialized yet
 		movlw	MIN_DHWSETPOINT
 		movwf	dhwsetpointmin
@@ -1992,6 +2006,9 @@ PrintByteJ2	movfw	loopcounter
 PrintLDigit	bsf	LeadingZero
 		goto	PrintDigit
 
+PrintNibble	andlw	b'1111'
+		bra	PrintByte
+
 PrintSigShort	btfsc	float1,7
 		call	PrintNegative
 PrintShort	movlw	16
@@ -2273,21 +2290,21 @@ HandleResponse	bsf	BoilerAlive	;Received a message from the boiler
 		movfw	byte2
 		xorwf	prioritymsgid,W	;Response matches ID of priority msg?
 		skpnz
-		bcf	initflags,INITPM;Priority message answered
+		clrf	prioritymsgid	;Priority message answered
 		btfss	byte1,4		;For Read-Ack messages, ...
 		call	StoreValue	;... store the value from the boiler
 		call	UnknownMask	;Check boiler support for the DataID
 		btfsc	byte1,5
 		btfss	byte1,4
-		goto	MsgSupported	;No Unknown-DataID response
+		bra	MsgSupported	;No Unknown-DataID response
 		skpnz
-		goto	MsgUnsupported	;Already found 3 consecutive failures
+		bra	MsgUnsupported	;Already found 3 consecutive failures
 		andlw	b'01010101'	;Get lower bit of the mask
 		addwf	INDF0,F		;Increase failure count
-		goto	HandleRespJump
+		bra	HandleRespJump
 MsgUnsupported	movfw	byte2		;Get the message ID
 		pcall	DeleteAlt	;Remove from the list of alternatives
-		goto	HandleRespJump
+		bra	HandleRespJump
 MsgSupported	xorlw	-1		;Invert the mask
 		btfss	initflags,INITNR;Do nothing for priority requests
 		andwf	INDF0,F		;Reset the failure count
@@ -2296,12 +2313,12 @@ HandleRespJump	bcf	initflags,INITNR
 		btfsc	Unsolicited
 		goto	RemoteCommand
 		btfsc	AlternativeUsed	;No alternative request was sent?
-		goto	SendAltResponse
+		bra	SendAltResponse
 		call	TreatMessage	;Process the received response
 		btfsc	AlternativeUsed	;Was the response modified in some way?
 		btfsc	NoThermostat	;And a thermostat is connected?
 		return
-		goto	SetParity
+		bra	SetParity
 SendAltResponse	call	TreatMessage	;Process the received response
 		bsf	AlternativeDone
 		btfsc	NoThermostat
@@ -2467,7 +2484,7 @@ messagetable	goto	MessageID0	;Data ID 0
 		goto	FakeResponse	;Data ID 96
 		goto	FakeResponse	;Data ID 97
 		goto	FakeResponse	;Data ID 98
-		goto	FakeResponse	;Data ID 99
+		goto	MessageID99	;Data ID 99
 		goto	MessageID100	;Data ID 100
 		goto	ByteResponse	;Data ID 101
 		goto	WordResponse	;Data ID 102
@@ -2498,7 +2515,7 @@ messagetable	goto	MessageID0	;Data ID 0
 		goto	WordResponse	;Data ID 127
 
 messageinv	movlw	B_INV
-		goto	setbyte1
+		bra	setbyte1
 messageack	movfw	originaltype	;Get original request type
 		iorlw	b'11000000'	;Turn it into a matching acknowledgement
 		btfss	byte1,7
@@ -2543,15 +2560,18 @@ MessageID0	btfsc	MsgResponse	;Status request or response?
 		goto	statusreturn
 readstatus	call	MandatoryID	;Remove any blacklisting for the DataID
 		comf	statusflags,W
-		iorlw	b'11101010'	;Mask off CHMode, Cooling, and CH2Mode
+		iorlw	b'11101010'	;Mask CHMode, Cooling, and CH2Mode bits
+		andlw	b'11111101'	;Assume domestic hot water enable off
 		btfss	HotWaterEnable
-		andlw	b'11111101'	;Domestic hot water enable off
+		btfsc	dhwpushspoof
+		iorlw	b'00000010'	;Domestic hot water enable on
 		movwf	temp		;Used as bit values
 		clrw			;Used as mask
 		btfsc	SysCtrlSetpoint
 		btfsc	HeatDemand
 		iorlw	1 << 0		;Enable central heating mode
-		btfsc	HotWaterSwitch
+		btfss	HotWaterSwitch
+		btfsc	dhwpushspoof
 		iorlw	1 << 1		;Manipulate hot water enable
 		btfss	SysCoolLevel
 		iorlw	1 << 2		;Manipulate cooling enable
@@ -2565,6 +2585,8 @@ readstatus	call	MandatoryID	;Remove any blacklisting for the DataID
 
 statusreturn	btfsc	byte1,5
 		return			;Not a valid response from the boiler
+		btfsc	dhwpushspoof
+		call	dhwpushcheck
 		movfw	byte4
 		movwf	databyte2	;Copy slave status to response message
 		andlw	b'01000001'	;Check fault bit and diagnostic bit
@@ -2576,7 +2598,6 @@ statusreturn	btfsc	byte1,5
 		bsf	BoilerFault	;Remember a fault was reported
 		movlw	MSG_FAULTCODE	;ASF-flags/OEM-fault-code message
 		movwf	prioritymsgid	;Schedule request for more information
-		bsf	initflags,INITPM
 statusmaint	movlw	'M'
 		call	SwitchLED	;Update the maintenance LED
 		movfw	byte4
@@ -2595,6 +2616,22 @@ statusmaint	movlw	'M'
 		andlw	b'00000010'	;Check the DHW enable bit
 		movlw	'C'
 		goto	SwitchLED	;Update the comfort mode LED
+
+dhwpushcheck	btfsc	dhwpushstarted
+		bra	dhwpushstage2
+		btfss	byte4,3		;Flame on?
+		bra	dhwpushstage1
+		btfsc	byte4,2		;DHW mode not active?
+		bsf	dhwpushstarted	;DHW push has been activated
+		return
+dhwpushstage1	incf	dhwpushflags,F	;Count the unsuccessful try
+		btfss	dhwpushstarted	;Counter overflow?
+		return
+		bra	dhwpushdone	;DHW push failed
+dhwpushstage2	btfss	byte4,2		;DHW mode still active?
+dhwpushdone	clrf	dhwpushflags	;DHW push finished
+		bcf	manualdhwpush
+		return
 
 ;DataID 1: Control Setpoint
 ;If a control setpoint has been specified via a serial command, the specified
@@ -2970,6 +3007,64 @@ MessageID71	lsrf	ventsetpoint,W	;Get the user defined setpoint
 		call	setbyte4	;Put the setpoint in the low byte
 		goto	setbyte3	;Clear the high byte
 
+MessageID99	swapf	byte1,W
+		andlw	b'111'
+		brw
+		bra	ID99ReadData	;Read-Data
+		bra	ID99WriteData	;Write-Data
+		return			;Invalid-Data
+		return			;-reserved-
+		bra	ID99ReadAck	;Read-Ack
+		bra	ID99WriteAck	;Write-Ack
+		nop			;Data-Invalid
+ID99Unknown	btfsc	manualdhwpush	;No pending DHW push
+		bsf	dhwpushspoof	;Spoof DHW push
+		bra	OperModeAck
+
+ID99WriteAck	bcf	opermodewrite	
+OperModeFlag	movfw	byte3
+		xorwf	operatingmode1,W
+		andlw	1 << 4		;DHW push bit
+		xorwf   operatingmode1,F
+OperModeAck	bcf	initflags,INITOM;Oper modes request has been answered
+		call	messageack	;Turn request into corresponding ack
+OperModeData	movfw	operatingmode1
+		call	setbyte3
+		movfw	operatingmode2
+		goto	setbyte4
+
+ID99ReadData	btfss	opermodewrite
+		return
+		movlw	T_WRITE
+		call	setbyte1	;Turn request into a write
+		bcf	OverrideUsed	;Changing more than just the data bytes
+		bra	OperModeData
+
+ID99ReadAck	btfss	initflags,INITOM
+		bra	OperModeFlag
+		bcf	initflags,INITOM
+ID99WriteData	movfw	byte3
+		movwf	operatingmode1
+		movfw	byte4
+		movwf	operatingmode2
+		btfsc	byte4,4
+StartDHWPush	btfsc	manualdhwpush
+		return			;DHW push is already in progress
+		bsf	manualdhwpush
+		call	PushOperModes	;Send to the oper modes to the boiler
+		skpnz			;ID 99 is not known to be unsupported
+		bsf	dhwpushspoof	;Need to spoof DHW push
+		return
+
+PushOperModes	movlw	99
+		call	UnknownMask	;Check if the boiler supports ID 99
+		skpnz			;Data ID is not known to be unsupported
+		return
+		movlw	99
+		movwf	prioritymsgid	;Send ID 99 at the first opportunity
+		bsf	opermodewrite	;Perform write operation for MsgID99
+		return
+
 ;Indicate under which conditions the remote override setpoint can be overridden
 ;by the thermostat. The opentherm specs are quite confusing regarding which byte
 ;the flags must be in. So the gateway has an option to put them in both bytes.
@@ -3044,7 +3139,6 @@ TSPBufferSize	btfss	MsgResponse	;Only interested in responses
 		movwf	TSPCount	;Store the number of entries
 		incf	byte2,W		;Reading entries is the next MsgID
 		movwf	prioritymsgid	;Start reading entries
-		bsf	initflags,INITPM
 		return
 
 TSPReadEntry	btfsc	MsgResponse	;Only interested in responses ...
@@ -3053,8 +3147,10 @@ TSPReadEntry	btfsc	MsgResponse	;Only interested in responses ...
 		incf	TSPIndex,F	;Index of next entry
 		movfw	TSPCount
 		subwf	TSPIndex,W	;Check if more entries exist
-		skpc
-		bsf	initflags,INITPM;Prepare to read next entry
+		skpnc
+		return
+		movfw	byte2
+		movwf	prioritymsgid	;Prepare to read next entry
 		return
 
 ;Remove blacklisting for special DataIDs. Do this when receiving a request, so
@@ -3070,7 +3166,7 @@ Alternative	movlw	T_READ		;Alternative is probably a read command
 		movwf	byte1
 		clrf	byte3		;With a data value of 0
 		clrf	byte4
-InitCmdLoop	lslf	initflags,W	;Check if there are any init messages
+InitCmdLoop	tstf	initflags	;Check if there are any init messages
 		skpnz
 		goto	SendPriorityMsg
 		;Obtain some parameters from the boiler that are useful for the
@@ -3101,6 +3197,9 @@ AdminMessages	bsf	tempvar0,INITRP
 		bsf	tempvar0,INITSH
 		btfsc	initflags,INITSH
 		goto	SetHeatingSet
+		bsf	tempvar0,INITOM
+		btfsc   initflags,INITOM
+		retlw	MSG_OPERMODES
 		bsf	tempvar0,INITRR
 		btfss	initflags,INITRR
 		retlw	0
@@ -3108,7 +3207,8 @@ AdminMessages	bsf	tempvar0,INITRP
 		movwf	byte3
 		retlw   MSG_REMOTECMD
 
-SendPriorityMsg	btfss	initflags,INITPM
+SendPriorityMsg	tstf	prioritymsgid
+		skpnz
 		goto	InitDone
 		bsf	initflags,INITNR;Don't whitelist if command succeeds
 		movfw	TSPIndex	;This is 0 when not requesting TSPs
@@ -3383,7 +3483,7 @@ SerialCmdSub	movlw	low rxbuffer
 		movwf	temp		;Save for later use
 		andlw	~b'11111'	;First quick check for a valid command
 		skpz
-		goto	SerialCmdCH2	; C2, H2 commands
+		goto	SerialCmdCH2	; C2, H2, M2 commands
 		movfw	temp
 		brw			;Make a quick initial selection
 ; Calculate table index with Tcl: tcl::mathop::^ {*}[scan SB %c%c]
@@ -3392,7 +3492,7 @@ SerialCmdTable	goto	SerialCmd00	; AA, MM, RR, TT commands
 		goto	SerialCmd02	; PR, KI commands
 		goto	SerialCmd03	; PS command
 		goto	SerialCmd04	; VR, SW commands
-		goto	SerialCmd05	; DA, GB, VS commands
+		goto	SerialCmd05	; DA, GB, MH, VS commands
 		goto	SerialCmd06	; CE, GA commands
 		goto	SerialCmd07	; OH, TS commands
 		goto	SerialCmdLED	; LD command
@@ -3421,7 +3521,7 @@ SerialCmdTable	goto	SerialCmd00	; AA, MM, RR, TT commands
 		goto	SerialCmd17	; TC command
 		retlw	CommandNG
 		retlw	CommandNG
-		retlw	CommandNG
+		goto	SerialCmd1A	; MW command
 		goto	SerialCmd1B	; OT, SH commands
 		goto	SerialCmd1C	; UI command
 		goto	SerialCmd1D	; IT, PM commands
@@ -3486,6 +3586,9 @@ SerialCmd05	movfw	INDF1
 		xorlw	'D' ^ 'V'
 		skpnz
 		goto	SetVentSetpoint
+		xorlw	'V' ^ 'M'
+		skpnz
+		goto	SetOperModeHC1
 		goto	SerialCmdGPIO
 
 SerialCmd06	movfw	INDF1
@@ -3551,6 +3654,12 @@ SerialCmd17	movfw	INDF1
 		xorlw	'T'
 		skpnz
 		goto	SetContSetPoint
+		retlw	CommandNG
+
+SerialCmd1A	movfw	INDF1
+		xorlw	'M'
+		skpnz
+		goto	SetOperModeDHW
 		retlw	CommandNG
 
 SerialCmd1B	movfw	INDF1
@@ -3966,10 +4075,13 @@ SetHotWater	movfw	rxpointer
 		sublw	4
 		skpz
 		retlw	SyntaxError
+		moviw	3[FSR1]
+		sublw	'P'
+		skpnz
+		bra	SetHotWaterPush
 		bcf	HotWaterSwitch
 		bcf	HotWaterEnable
-		moviw	3[FSR1]
-		sublw	'1'
+		addlw	'1' - 'P'
 		skpnz
 		bsf	HotWaterEnable
 		andlw	~1
@@ -3977,6 +4089,9 @@ SetHotWater	movfw	rxpointer
 		bsf	HotWaterSwitch
 		call	SaveConfig
 		lgoto	PrintHotWater
+SetHotWaterPush	lcall	StartDHWPush
+		movlw	'P'
+		lgoto	PrintChar
 
 SetCentralHeat	call	CheckBoolean
 		skpc
@@ -4029,6 +4144,36 @@ SetCoolLevel	call	GetPercentArg
 		goto	CommandFloat
 ClrCoolLevel	bsf	SysCoolLevel
 		goto	ValueCleared
+
+SetOperModeHC1	call	GetDecimalArg	;Get the value
+		skpnc
+		return
+		andlw	b'11110000'
+		skpz
+		retlw	OutOfRange
+		movfw	temp
+		xorwf	operatingmode2,W
+		andlw	b'00001111'
+		xorwf	operatingmode2,F
+		call	GoPushOperModes	;Send to the oper modes to the boiler
+		movfw	operatingmode2
+		lgoto	PrintNibble
+
+GoPushOperModes	lgoto	PushOperModes
+
+SetOperModeDHW	call	GetDecimalArg	;Get the value
+		skpnc
+		return
+		andlw	b'11110000'
+		skpz
+		retlw	OutOfRange
+		movfw	temp
+		xorwf	operatingmode1,W
+		andlw	b'00001111'
+		xorwf	operatingmode1,F
+		call	GoPushOperModes	;Send to the oper modes to the boiler
+		movfw	operatingmode1
+		lgoto	PrintNibble
 
 SaveConfig	movfw	conf
 		movwf	temp
@@ -4435,7 +4580,6 @@ SetPrioMessage	call	GetDecimalArg	;Get the DataID
 		skpz
 		retlw	SyntaxError
 		movwf	prioritymsgid
-		bsf	initflags,INITPM
 		clrf	TSPCount
 		clrf	TSPIndex
 		lgoto	PrintByte
@@ -4645,8 +4789,26 @@ SerialCmdCH2	moviw	1[FSR1]
 		skpnz
 		goto	SetCtrlSetpt2
 		xorlw	'C' ^ 'H'
+		skpnz
+		goto	SetCentralHeat2
+		xorlw	'H' ^ 'M'
 		skpz
 		retlw	CommandNG	;Command is not valid
+
+SetOperModeHC2	call	GetDecimalArg	;Get the value
+		skpnc
+		return
+		andlw	b'11110000'
+		skpz
+		retlw	OutOfRange
+		swapf	temp,W
+		xorwf	operatingmode2,W
+		andlw	b'11110000'
+		xorwf	operatingmode2,F
+		call	GoPushOperModes	;Send to the oper modes to the boiler
+		swapf	operatingmode2,W
+		lgoto	PrintNibble
+
 SetCentralHeat2	call	CheckBoolean
 		skpc
 		return
@@ -4671,7 +4833,7 @@ RemoteRequest	call	GetDecimalArg
 		return
 		movwf	requestcode
 		bsf	initflags,INITRR
-		goto	PrintByte
+		lgoto	PrintByte
 
 ;************************************************************************
 ; Implement the GPIO port functions
