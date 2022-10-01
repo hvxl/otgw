@@ -99,11 +99,34 @@ public:
    virtual unsigned SetParity(unsigned message);
 };
 
+class Setpoint : public Float {
+   bool used = true;
+
+public:
+   Setpoint(double v) : Float("setpoint", v, "Room setpoint") {
+   }
+
+   void override(double d) {
+       if (used) Float::set(d);
+   }
+
+   void set(double d) {
+       Float::set(d);
+       used = false;
+   }
+
+   double getVal() {
+       used = true;
+       return Float::getVal();
+   }
+};
+
 class Thermostat : public Opentherm, public TriggerObject {
    TransmitAttribute *m_txbuffer;
    ModeAttribute *m_mode;
    PowerAttribute *m_power;
-   Float *m_interval, *m_roomtemp, *m_setpoint;
+   Float *m_interval, *m_roomtemp;
+   Setpoint *m_setpoint;
    guint64 msg_time;
    guint32 request[64] = {};
    int request_count = 0, pointer = 0, msgid = -1, override = 0;
@@ -131,9 +154,11 @@ public:
 
 class Boiler : public Opentherm, public TriggerObject {
    RespondAttribute *m_responder;
-   guint64 mode_time;
+   guint64 mode_time, dhw_time;
    guint32 response[256] = {};
    guint32 message;
+   unsigned masterstatus = 0, slavestatus = 0;
+   double ctrlsetpoint;
 
 public:
    explicit Boiler(const char *);
@@ -141,6 +166,7 @@ public:
    const char *GetDevice();
    void SetResponse(unsigned msg);
    void NewRxMessage(unsigned msg);
+   unsigned Status(unsigned msg);
    virtual void ReceiveMode(bool b) override;
    virtual std::string SummaryReport();
    void callback() override;

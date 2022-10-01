@@ -557,7 +557,7 @@ Thermostat::Thermostat(const char *name) : Opentherm(name, "Thermostat") {
     addSymbol(m_interval);
     m_roomtemp = new Float("temperature", 20.42, "Room temperature");
     addSymbol(m_roomtemp);
-    m_setpoint = new Float("setpoint", 20.5, "Room setpoint");
+    m_setpoint = new Setpoint(20.5);
     addSymbol(m_setpoint);
     m_power = new PowerAttribute(this);
     addSymbol(m_power);
@@ -617,7 +617,7 @@ void Thermostat::NewRxMessage(unsigned msg) {
      case 9:
 	if ((msg >> 28 & 7) == kReadAck) {
 	    if (override && (msg + 64 & 0xff80) == override) {
-		m_setpoint->set((double)override / 256);
+		m_setpoint->override((double)override / 256);
 	    } else {
 		override = msg + 64 & 0xff80;
 	    }
@@ -795,7 +795,7 @@ void Thermostat::callback() {
 	}
 	if (msgid == (request[pointer] >> 16 & 0xff)) {
 	    // Move on to the next message
-	    if (++pointer > request_count) pointer = 0;
+	    if (++pointer >= request_count) pointer = 0;
 	}
 	// Save the start time of sending the message
 	msg_time = get_cycles().get();
@@ -881,8 +881,22 @@ void Boiler::NewRxMessage(unsigned msg) {
     int msgid = msg >> 16 & 0xff;
     message = response[msgid];
     if (!message) {
+        unsigned slavestatus;
+        int type = msg >> 28 & 7;
 	// Unknown data ID
-	message = kUnknownDataID << 28 | msgid << 16;
+        switch (msgid) {
+         case 0:
+            slavestatus = Status(msg >> 8 & 0xff);
+            message = kReadAck << 28 | msgid << 16 | msg & 0xff00 | slavestatus;
+            break;
+         case 1:
+            ctrlsetpoint = (msg & 0xffff) / 256.;
+            message = msg | 0x40000000;
+            break;
+         default:
+            message = kUnknownDataID << 28 | msgid << 16;
+            break;
+        }
     } else {
 	int type = message >> 28 & 7;
 	switch (msg >> 28 & 7) {
@@ -920,6 +934,44 @@ void Boiler::NewRxMessage(unsigned msg) {
     // A slave must not respond earlier than after 20ms
     guint64 future_time = get_cycles().get(20e-3);
     get_cycles().set_break(future_time, this);
+}
+
+unsigned Boiler::Status(unsigned status) {
+    guint64 now = get_cycles().get();
+    // Perform actions based on the previous status value
+    if (masterstatus & 0x1) {
+        // CH enable
+        if (slavestatus & 0x2) {
+            // CH mode was already active - switch on the flame
+            slavestatus |= 0x8;
+        } else {
+            // Activate CH mode
+            slavestatus |= 0x2;
+        }
+    } else if (slavestatus & 0x2) {
+        // CH mode active
+        if (slavestatus & 0x8) {
+            // Flame on - switch it off
+            slavestatus &= ~0x8;
+        } else {
+            // Switch off CH mode
+            slavestatus &= ~0x2;
+        }
+    }
+    if (slavestatus & 0x4) {
+        if (now - dhw_time > 5 * get_cycles().instruction_cps()) {
+            slavestatus &= ~0x4;
+        }
+    } else if (masterstatus & 0x2 != status & 0x2) {
+        if (status & 0x2) {
+            // DHW enable switched on - Heat the DHW tank
+            dhw_time = get_cycles().get(5);
+        }
+    } else if (now - dhw_time < 5 * get_cycles().instruction_cps()) {
+        slavestatus |= 0x4;
+    }
+    masterstatus = status;
+    return slavestatus;
 }
 
 void Boiler::ReceiveMode(bool b) {
