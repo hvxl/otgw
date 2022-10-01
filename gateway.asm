@@ -5,7 +5,7 @@
 
 #define		version		"6.1"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"7"	;Comment out when not applicable
+#define 	patch		"8"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -2251,12 +2251,7 @@ HandleMessage	btfsc	MsgResponse	;Treat requests and responses differently
 		goto	HandleResponse
 HandleRequest	btfsc	byte1,4		;For Write-Data messages, ...
 		call	StoreValue	;... store the value from the thermostat
-		movfw	byte3
-		movwf	databyte1	;Save original data byte #1
-		movfw	byte4
-		movwf	databyte2	;Save original data byte #2
-		movfw	byte1
-		movwf	originaltype	;Save the original message type
+		call	StoreRequest	;Save the original type and data bytes
 CreateRequest	movfw	byte2
 		xorwf	originalreq,W	;Compare against previous message
 		skpz
@@ -2274,7 +2269,9 @@ CreateRequest	movfw	byte2
 SendDefaultMsg	btfsc	NoThermostat	;Is a thermostat connected?
 		goto	SetParity	;Calculate the parity of the new message
 		return			;Send message unmodified to the boiler
-SendAltRequest	bsf	AlternativeUsed	;Probably going to send a different msg
+SendAltRequest	btfsc	SendUserMessage	;Not sending a user message?
+		call	StoreRequest	;Save the original type and data bytes
+		bsf	AlternativeUsed	;Probably going to send a different msg
 		bcf	OverrideUsed	;Changes will be more drastic
 		call	Alternative	;Get the alternative message to send
 		btfss	AlternativeUsed
@@ -2283,6 +2280,14 @@ SendAltRequest	bsf	AlternativeUsed	;Probably going to send a different msg
 		movwf	byte2		;Fill in the alternative Message ID
 		call	TreatMessage	;Process the alternative message
 		goto	SetParity	;Calculate the parity of the new message
+
+StoreRequest	movfw	byte3
+		movwf	databyte1	;Save original data byte #1
+		movfw	byte4
+		movwf	databyte2	;Save original data byte #2
+		movfw	byte1
+		movwf	originaltype	;Save the original message type
+		return
 
 ;Vendor specific ID's can go through the code below without causing any trouble
 ;because the mask returned by UnknownMask will be 0.
@@ -3218,7 +3223,7 @@ SendPriorityMsg	tstf	prioritymsgid
 InitDone	clrf	initflags
 		movfw	resetflags	;Check for pending reset requests
 		skpz
-		goto	ResetCommand	;Send a reset command
+		goto	ResetCommand	;Send a counter reset command
 		btfsc	NoAlternative
 		goto	RestoreRequest	;No alternatives available, W = 0
 		movlw	32		;Size of the list of alternatives
