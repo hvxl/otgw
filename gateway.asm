@@ -446,6 +446,7 @@ onoffflags	res	1			;General bit flags
 #define		HeatDemand	onoffflags,3
 #define		ReturnInvalid	onoffflags,4
 #define		SendUserMessage	onoffflags,5	;User message in standalone mode
+#define		PriorityMsg	onoffflags,6
 #define		OneSecond	onoffflags,7	;Time to send the next message
 
 statusflags	res	1			;Master status flags
@@ -2295,7 +2296,7 @@ HandleResponse	bsf	BoilerAlive	;Received a message from the boiler
 		movfw	byte2
 		xorwf	prioritymsgid,W	;Response matches ID of priority msg?
 		skpnz
-		clrf	prioritymsgid	;Priority message answered
+		bcf	PriorityMsg	;Priority message answered
 		btfss	byte1,4		;For Read-Ack messages, ...
 		call	StoreValue	;... store the value from the boiler
 		call	UnknownMask	;Check boiler support for the DataID
@@ -2603,6 +2604,7 @@ statusreturn	btfsc	byte1,5
 		bsf	BoilerFault	;Remember a fault was reported
 		movlw	MSG_FAULTCODE	;ASF-flags/OEM-fault-code message
 		movwf	prioritymsgid	;Schedule request for more information
+		bsf	PriorityMsg
 statusmaint	movlw	'M'
 		call	SwitchLED	;Update the maintenance LED
 		movfw	byte4
@@ -3067,6 +3069,7 @@ PushOperModes	movlw	99
 		return
 		movlw	99
 		movwf	prioritymsgid	;Send ID 99 at the first opportunity
+		bsf	PriorityMsg
 		bsf	opermodewrite	;Perform write operation for MsgID99
 		return
 
@@ -3144,18 +3147,17 @@ TSPBufferSize	btfss	MsgResponse	;Only interested in responses
 		movwf	TSPCount	;Store the number of entries
 		incf	byte2,W		;Reading entries is the next MsgID
 		movwf	prioritymsgid	;Start reading entries
+		bsf	PriorityMsg
 		return
 
-TSPReadEntry	btfsc	MsgResponse	;Only interested in responses ...
-		btfss	AlternativeUsed	;... not requested by the thermostat
+TSPReadEntry	btfss	MsgResponse	;Only interested in responses ...
 		goto	ByteResponse
+		btfsc	AlternativeUsed	;... not requested by the thermostat
 		incf	TSPIndex,F	;Index of next entry
 		movfw	TSPCount
 		subwf	TSPIndex,W	;Check if more entries exist
-		skpnc
-		return
-		movfw	byte2
-		movwf	prioritymsgid	;Prepare to read next entry
+		skpc
+		bsf	PriorityMsg	;Prepare to read next entry
 		return
 
 ;Remove blacklisting for special DataIDs. Do this when receiving a request, so
@@ -3212,8 +3214,7 @@ AdminMessages	bsf	tempvar0,INITRP
 		movwf	byte3
 		retlw   MSG_REMOTECMD
 
-SendPriorityMsg	tstf	prioritymsgid
-		skpnz
+SendPriorityMsg	btfss	PriorityMsg
 		goto	InitDone
 		bsf	initflags,INITNR;Don't whitelist if command succeeds
 		movfw	TSPIndex	;This is 0 when not requesting TSPs
@@ -4585,6 +4586,7 @@ SetPrioMessage	call	GetDecimalArg	;Get the DataID
 		skpz
 		retlw	SyntaxError
 		movwf	prioritymsgid
+		bsf	PriorityMsg
 		clrf	TSPCount
 		clrf	TSPIndex
 		lgoto	PrintByte

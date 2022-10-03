@@ -4,6 +4,8 @@
 /* IN_MODULE should be defined for modules */
 #define IN_MODULE
 
+#include <vector>
+#include <map>
 #include "modules.h"
 #include "value.h"
 #include "trigger.h"
@@ -53,12 +55,15 @@ enum PowerStates {
     kPowerWaitHigh
 };
 
+typedef std::vector<guint8> tspdata;
+
 class ModeAttribute;
 class TransmitAttribute;
 class ReceiveAttribute;
 class RespondAttribute;
 class ReportAttribute;
 class PowerAttribute;
+class TSPAttribute;
 class OTInput;
 class OTOutput;
 class Transmitter;
@@ -154,11 +159,13 @@ public:
 
 class Boiler : public Opentherm, public TriggerObject {
    RespondAttribute *m_responder;
+   TSPAttribute *m_tsp;
    guint64 mode_time, dhw_time;
    guint32 response[256] = {};
    guint32 message;
    unsigned masterstatus = 0, slavestatus = 0;
    double ctrlsetpoint;
+   std::map<guint8, tspdata> tsp;
 
 public:
    explicit Boiler(const char *);
@@ -167,6 +174,8 @@ public:
    void SetResponse(unsigned msg);
    void NewRxMessage(unsigned msg);
    unsigned Status(unsigned msg);
+   void SetupTSP(guint8 id);
+   void SetupTSP(guint8 id, guint8 cnt, guint8 list[]);
    virtual void ReceiveMode(bool b) override;
    virtual std::string SummaryReport();
    void callback() override;

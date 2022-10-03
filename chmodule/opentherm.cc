@@ -216,6 +216,62 @@ public:
    }
 };
 
+class TSPAttribute : public String {
+   Boiler *ot;
+
+public:
+   TSPAttribute(Boiler *_ot)
+     : String("TSP", "", "Configure TSPs"), ot(_ot)
+   {
+   }
+
+   void set(Value *v) {
+       if (typeid(*v) == typeid(String)) {
+	   char buff[1300];
+	   v->get(buff, sizeof(buff));
+	   set(buff);
+       }
+   }
+
+   void set(const char *buffer, int len = 0) override {
+       if (buffer && *buffer) {
+           guint8 id, cnt = 0;
+           guint8 list[256];
+           char *s, *p;
+           const std::string usage = " string format: <id>[: <value>, ...]";
+           id = strtol(buffer, &s, 10);
+           if (!*s) {
+               ot->SetupTSP(id);
+               return;
+           }
+           if (*s != ':') {
+               throw Error(usage);
+           }
+           while (*++s) {
+               list[cnt++] = strtol(s, &p, 10);
+               if (p == s) {
+                   throw Error(usage);
+               }
+               if (!cnt) {
+                   throw Error(" too many values (max: 255)");
+               }
+               s = p;
+               if (!*s) {
+                   ot->SetupTSP(id, cnt, list);
+                   return;
+               }
+               if (*s != ',') {
+                   throw Error(usage);
+               }
+           }
+       }
+   }
+
+   std::string toString() override {
+       return "";
+   }
+};
+
 // I/O pin class for an Opentherm input. The pin will be connected to a PIC
 // digital output pin. The PIC output levels are inverted.
 class OTInput : public IO_bi_directional_pu {
@@ -847,6 +903,8 @@ Boiler::Boiler(const char *name) : Opentherm(name, "Boiler") {
     // Attributes for user interaction
     m_responder = new RespondAttribute(this);
     addSymbol(m_responder);
+    m_tsp = new TSPAttribute(this);
+    addSymbol(m_tsp);
 
     LogicalLevels(0.1, 4.2);
 }
@@ -894,7 +952,22 @@ void Boiler::NewRxMessage(unsigned msg) {
             message = msg | 0x40000000;
             break;
          default:
-            message = kUnknownDataID << 28 | msgid << 16;
+            if (tsp.count(msgid)) {
+                int index = msg >> 8 & 0xff;
+                tspdata &list = tsp[msgid];
+                if (index >= list.size()) {
+                    message = kDataInvalid << 28 | msg & 0xffff00;
+                } else if (type == kReadData) {
+                    message = msg & 0x7fffff00 | 0x40000000 | list[index];
+                } else if (type == kWriteData) {
+                    list[index] = msg;
+                    message = msg | 0x40000000;
+                } else {
+                    return;
+                }
+            } else {
+                message = kUnknownDataID << 28 | msgid << 16;
+            }
             break;
         }
     } else {
@@ -972,6 +1045,18 @@ unsigned Boiler::Status(unsigned status) {
     }
     masterstatus = status;
     return slavestatus;
+}
+
+void Boiler::SetupTSP(guint8 id) {
+    SetResponse(SetParity(4 << 28 | id << 16));
+    id++;
+    tsp.erase(id);
+}
+
+void Boiler::SetupTSP(guint8 id, guint8 cnt, guint8 *values) {
+    SetResponse(SetParity(4 << 28 | id << 16 | cnt << 8));
+    id++;
+    tsp[id].assign(values, values + cnt);
 }
 
 void Boiler::ReceiveMode(bool b) {
