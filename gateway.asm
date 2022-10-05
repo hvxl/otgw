@@ -5,7 +5,7 @@
 
 #define		version		"6.1"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"8"	;Comment out when not applicable
+#define 	patch		"9"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -301,6 +301,7 @@ float1		res	1			;Must be in shared RAM
 float2		res	1			;Must be in shared RAM
 loopcounter	res	1
 
+modeflags	res	0	;Alias for mode for debugging
 mode		res	1
 MONMODEBIT	equ	0	;Position of the bit returned by CheckBoolean
 #define		MonitorMode	mode,MONMODEBIT
@@ -455,6 +456,7 @@ statusflags	res	1			;Master status flags
 #define		CH2ModeOff	statusflags,4	;Must match ID0:HB4
 
 gpioflags	res	1			;General bit flags
+#define		PrioMsgWrite	gpioflags,0
 #define		VirtualLedE	gpioflags,1	;Must be bit 1
 #define		VirtualLedF	gpioflags,2	;Must be bit 2
 #define		gpioaway	gpioflags,3
@@ -485,6 +487,7 @@ repeatcount	res	1	;Count same message from the thermostat
 
 TSPCount	res	1
 TSPIndex	res	1
+TSPValue	res	1
 
 settings	res	1			;Bits 0-4: voltage reference
 #define		IgnoreErr1	settings,5	;For bouncing high<->low changes
@@ -2402,7 +2405,7 @@ messagetable	goto	MessageID0	;Data ID 0
 		goto	MessageID8	;Data ID 8
 		goto	MessageID9	;Data ID 9
 		goto	TSPBufferSize	;Data ID 10
-		goto	TSPReadEntry	;Data ID 11
+		goto	TSPReadWrite	;Data ID 11
 		goto	TSPBufferSize	;Data ID 12
 		goto	TSPReadEntry	;Data ID 13
 		goto	MessageID14	;Data ID 14
@@ -2480,7 +2483,7 @@ messagetable	goto	MessageID0	;Data ID 0
 		goto	WordResponse	;Data ID 86
 		goto	WordResponse	;Data ID 87
 		goto	TSPBufferSize	;Data ID 88
-		goto	TSPReadEntry	;Data ID 89
+		goto	TSPReadWrite	;Data ID 89
 		goto	TSPBufferSize	;Data ID 90
 		goto	TSPReadEntry	;Data ID 91
 		goto	FakeResponse	;Data ID 92
@@ -2497,7 +2500,7 @@ messagetable	goto	MessageID0	;Data ID 0
 		goto	WordResponse	;Data ID 103
 		goto	WordResponse	;Data ID 104
 		goto	TSPBufferSize	;Data ID 105
-		goto	TSPReadEntry	;Data ID 106
+		goto	TSPReadWrite	;Data ID 106
 		goto	TSPBufferSize	;Data ID 107
 		goto	TSPReadEntry	;Data ID 108
 		goto	FakeResponse	;Data ID 109
@@ -2603,8 +2606,7 @@ statusreturn	btfsc	byte1,5
 		goto	statusmaint
 		bsf	BoilerFault	;Remember a fault was reported
 		movlw	MSG_FAULTCODE	;ASF-flags/OEM-fault-code message
-		movwf	prioritymsgid	;Schedule request for more information
-		bsf	PriorityMsg
+		call	SetPriorityMsg	;Schedule request for more information
 statusmaint	movlw	'M'
 		call	SwitchLED	;Update the maintenance LED
 		movfw	byte4
@@ -3068,10 +3070,8 @@ PushOperModes	movlw	99
 		skpnz			;Data ID is not known to be unsupported
 		return
 		movlw	99
-		movwf	prioritymsgid	;Send ID 99 at the first opportunity
-		bsf	PriorityMsg
 		bsf	opermodewrite	;Perform write operation for MsgID99
-		return
+		goto	SetPriorityMsg	;Send ID 99 at the first opportunity
 
 ;Indicate under which conditions the remote override setpoint can be overridden
 ;by the thermostat. The opentherm specs are quite confusing regarding which byte
@@ -3146,10 +3146,20 @@ TSPBufferSize	btfss	MsgResponse	;Only interested in responses
 		return			;No (valid) data available
 		movwf	TSPCount	;Store the number of entries
 		incf	byte2,W		;Reading entries is the next MsgID
-		movwf	prioritymsgid	;Start reading entries
+SetPriorityMsg	movwf	prioritymsgid	;Start reading entries
 		bsf	PriorityMsg
+		bcf	PrioMsgWrite
 		return
 
+TSPReadWrite	btfss	MsgResponse	;Only interested in requests ...
+		btfss	AlternativeUsed	;... not initiated by the thermostat
+		bra	TSPReadEntry	;Apply normal treatment
+		btfss	PrioMsgWrite
+		bra	TSPReadEntry	;Apply normal treatment
+		movlw	T_WRITE
+		call	setbyte1	;Turn request into a write
+		movfw	TSPValue
+		goto	setbyte4	;Fill in the value
 TSPReadEntry	btfss	MsgResponse	;Only interested in responses ...
 		goto	ByteResponse
 		btfsc	AlternativeUsed	;... not requested by the thermostat
@@ -3497,7 +3507,7 @@ SerialCmdTable	goto	SerialCmd00	; AA, MM, RR, TT commands
 		goto	SerialCmd01	; RS, SR commands
 		goto	SerialCmd02	; PR, KI commands
 		goto	SerialCmd03	; PS command
-		goto	SerialCmd04	; VR, SW commands
+		goto	SerialCmd04	; SW, TP, VR commands
 		goto	SerialCmd05	; DA, GB, MH, VS commands
 		goto	SerialCmd06	; CE, GA commands
 		goto	SerialCmd07	; OH, TS commands
@@ -3583,6 +3593,9 @@ SerialCmd04	movfw	INDF1
 		xorlw	'V' ^ 'S'
 		skpnz
 		goto	SetHotWaterTemp
+		xorlw	'S' ^ 'T'
+		skpnz
+		goto	SlaveParameter
 		retlw	CommandNG
 
 SerialCmd05	movfw	INDF1
@@ -4181,6 +4194,73 @@ SetOperModeDHW	call	GetDecimalArg	;Get the value
 		movfw	operatingmode1
 		lgoto	PrintNibble
 
+SlaveParameter	call	GetDecimalArg	;Get the ID
+		skpnc
+		return
+		movwf	prioritymsgid
+		bcf	PriorityMsg
+		bcf	PrioMsgWrite
+		;Check for a valid TSP or FHB message ID
+		movlw	6		;6 possible values
+		movwf	loopcounter
+SlaveParamCheck	movfw	loopcounter
+		decf	loopcounter,F
+		brw
+		retlw	BadValue	;Not a valid message ID
+		addlw	108 - 106 + 1	;Message ID 108
+		addlw	106 - 91 + 1	;Message ID 106
+		addlw	91 - 89 + 1	;Message ID 91
+		addlw	89 - 13 + 1	;Message ID 89
+		addlw	13 - 11 + 1	;Message ID 13
+		addlw	11 - 6		;Message ID 11
+		subwf	prioritymsgid,W
+		skpz
+		bra	SlaveParamCheck
+
+		moviw	FSR1++
+		sublw	':'
+		skpz
+		retlw	SyntaxError
+
+		call	GetDecimal	;Get the TSP index
+		skpnc
+		return
+		movwf	TSPIndex	;Save the TSP index
+		addlw	1
+		movwf	TSPCount	;Pretend the index is the last TSP
+
+		moviw	FSR1++
+		skpnz
+		bra	SlaveParamRead
+		sublw	'='
+		btfsc	loopcounter,0	;FHBs are not writable
+		skpz
+		retlw	SyntaxError
+
+		call	GetDecimal	;Get the new value
+		skpnc
+		return
+		tstf	INDF1		;Check end of string
+		skpz
+		retlw	SyntaxError
+		movwf	TSPValue
+		bsf	PrioMsgWrite
+
+SlaveParamRead	bsf	PriorityMsg	;Request the TSP
+
+		movfw	prioritymsgid	;Confirm the command
+		lcall	PrintByte
+		movlw	':'
+		call	PrintChar
+		movfw	TSPIndex
+		btfss	PrioMsgWrite
+		goto	PrintByte
+		call	PrintByte
+		movlw	'='
+		call	PrintChar
+		movfw	TSPValue
+		goto	PrintByte
+
 SaveConfig	movfw	conf
 		movwf	temp
 		movlw	Configuration
@@ -4587,6 +4667,7 @@ SetPrioMessage	call	GetDecimalArg	;Get the DataID
 		retlw	SyntaxError
 		movwf	prioritymsgid
 		bsf	PriorityMsg
+		bcf	PrioMsgWrite
 		clrf	TSPCount
 		clrf	TSPIndex
 		lgoto	PrintByte

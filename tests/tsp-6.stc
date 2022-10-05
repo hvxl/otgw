@@ -1,0 +1,25 @@
+test "Write TSP with thermostat interfering"
+
+load boiler.stc
+Boiler.TSP = "10: 42, 88, 17"
+load thermostat.stc
+Thermostat.tx = 0x000B0200
+
+
+go 1500000
+Serial.tx = "DA=116\r"
+Serial.tx = "DA=117\r"
+Serial.tx = "DA=118\r"
+Serial.tx = "DA=119\r"
+Serial.tx = "DA=120\r"
+Serial.tx = "DA=121\r"
+Serial.tx = "DA=122\r"
+Serial.tx = "DA=123\r"
+
+go 3000000
+
+Serial.tx = "TP=11:1=39\r"
+go 30000000
+
+check R.00B.... R900B0127
+check R.00B.... {}
