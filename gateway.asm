@@ -5,7 +5,7 @@
 
 #define		version		"6.1"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"9"	;Comment out when not applicable
+#define 	patch		"10"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -477,6 +477,11 @@ dhwpushflags	res	1
 #define		dhwpushpending	dhwpushflags,5
 #define		dhwpushinit	dhwpushflags,6
 #define		opermodewrite	dhwpushflags,7
+
+heartbeatflags	res	1	;Can be moved to another bank, if necessary
+#define		HeartbeatSC	heartbeatflags,0
+#define		HeartbeatCS	heartbeatflags,1
+#define		HeartbeatC2	heartbeatflags,2
 
 ;Bits 0..2 are used as a counter to allow 8 attempts for the override to stick
 
@@ -1232,11 +1237,7 @@ WaitConvert	btfsc	ADCON0,GO	;Check that A/D conversion is finished
 		bsf	SysMaxModLevel	;No user defined max modulation
 		bsf	SysCoolLevel	;No user defined cooling level
 		bsf	SysCH2Setpoint	;No user defined CH2 control setpoint
-
-		bsf	InvalidTime
-
-		movlw	100
-		movwf	MaxModLevel	;Initialize Max Modulation Level at 100%
+		bsf	InvalidTime	;No user specified time information
 
 		movlw	ONESEC
 		movwf	SecCounter	;Initialize second counter
@@ -1557,11 +1558,22 @@ FlashTimer	bcf	PIR1,TMR1IF	;Clear timer overrun flag
 		pcall	SwitchLED
 		return
 
-CommandExpiry	decfsz	minutetimer,F	;Count down the expiry timer
+CommandExpiry	decf	minutetimer,F	;Count down the expiry timer
+		btfss	Expired
 		return			;Timer has not expired
+		btfss	HeartbeatSC	;SC command in the past minute?
 		bsf	InvalidTime	;Mark the time as invalid
+		btfss	HeartbeatCS	;CS command in the past minute?
 		bsf	SysCtrlSetpoint	;Invalidate the control setpoint
-		return
+		btfss	HeartbeatC2	;C2 command in the past minute?
+		bsf	SysCH2Setpoint	;Invalidate the CH2 control setpoint
+		pagesel	StartTimer
+		movlw	b'111'
+		andwf	heartbeatflags,W
+		skpz			;No commands in the past minute?
+		call	StartTimer	;Restart the timer
+		pagesel	$
+		return			;Timer stopped
 
 SummaryReport	movfw	txavailable	;Check if space is available in buffer
 		sublw	TXBUFSIZE - 20	;(A value may consume up to 19 chars)
@@ -2812,6 +2824,8 @@ MessageID14	btfsc	MsgResponse	;Status request or response?
 		return
 MsgId14Change	bsf	MsgWriteOp	;MaxRelMod must be a WriteData request
 		movfw	MaxModLevel	;Get the user specified max modulation
+		btfsc	SysMaxModLevel
+		movlw	100		;Use 100% if the user didn't specify
 		call	setbyte3	;Set the max modulation level
 		goto	setbyte4	;Clear the second data byte
 
@@ -3523,7 +3537,7 @@ SerialCmdTable	goto	SerialCmd00	; AA, MM, RR, TT commands
 #endif
 		goto	SerialCmdLED	; LB command
 		goto	SerialCmd0F	; CL, LC commands
-		goto	SerialCmd10	; GW, SC, CS commands
+		goto	SerialCmd10	; CS, GW, SC commands
 		goto	SerialCmd11	; CR, SB commands
 		goto	SerialCmd12	; FT command
 #ifndef __DEBUG
@@ -3955,10 +3969,20 @@ SetCtrlSetpoint	call	GetPercentArg
 		movwf	controlsetpt2
 		iorwf	float1,W
 		skpnz
-		bsf	SysCtrlSetpoint	;No user defined control setpoint
-		movlw	120
-		movwf	minutetimer
+		bra	ClrCtrlSetPoint
+		bsf	HeartbeatCS
+		call	StartTimer
 		goto	CommandFloat
+ClrCtrlSetPoint	bsf	SysCtrlSetpoint	;No user defined control setpoint
+		goto	CommandFloat
+
+StartTimer	btfss	Expired		;Timer not running?
+		return
+		movlw	~b'111'
+		andwf	heartbeatflags,F;Clear command flags
+		movlw	120
+		movwf	minutetimer	;Start the timer
+		return
 
 SetVentSetpoint	call	GetDecimalArg	;Get the ventilation setpoint
 		skpnc
@@ -4072,8 +4096,8 @@ SetClock	call	GetDecimalArg	;Get the hours
 		swapf	temp,F
 		lslf	temp,W
 		iorwf	clock1,F
-		movlw	120
-		movwf	minutetimer
+		bsf	HeartbeatSC
+		call	StartTimer
 		movfw	clock1
 		andlw	b'11111'
 		movwf	temp
@@ -4438,8 +4462,6 @@ SetMaxModLevel	call	GetDecimalArg	;Get the modulation level
 		movwf	MaxModLevel
 		lgoto	PrintByte
 ClrMaxModLevel	bsf	SysMaxModLevel
-		movlw	100
-		movwf	MaxModLevel
 		goto	ValueCleared
 
 ReportSetting	lgoto	PrintSetting
@@ -4913,7 +4935,11 @@ SetCtrlSetpt2	call	GetPercentArg
 		movwf	controlsetpt4
 		iorwf	float1,W
 		skpnz
-		bsf	SysCH2Setpoint	;No user defined control setpoint
+		bra	ClrCtrlSetpt2
+		bsf	HeartbeatC2
+		call	StartTimer
+		goto	CommandFloat
+ClrCtrlSetpt2	bsf	SysCH2Setpoint	;No user defined control setpoint
 		goto	CommandFloat
 
 RemoteRequest	call	GetDecimalArg

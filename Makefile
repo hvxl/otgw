@@ -1,5 +1,6 @@
 # -*- make -*-
 
+PIC = pic16f1847
 SCRIPT = 16f1847.lkr
 PROJECT = gateway
 OTGWOBJECTS = gateway.o ds1820.o selfprog.o
@@ -25,6 +26,7 @@ gateway.o: build.asm
 build.asm: gateway.asm ds1820.asm
 	$(TCLSH) tools/build.tcl
 
+test: export PIC ::= $(PIC)
 test: $(COD)
 	GPSIM=$(GPSIM) $(TCLSH) tests/all.tcl $(TESTFLAGS)
 
