@@ -1,4 +1,5 @@
 test "change transitions and reboot"
+constraint pic16f1847
 
 load boiler.stc
 load thermostat.stc

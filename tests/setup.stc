@@ -4,9 +4,6 @@ sim.verbosity = 0
 # Load the OTGW firmware
 load s gateway.cod
 
-p16f1847.xpos = 72
-p16f1847.ypos = 204
-
 module library libgpsim_modules
 module library libgpsim_otgw
 
@@ -52,7 +49,7 @@ VCC.resistance = 0.01
 node reset
 node ground
 node supply
-attach reset p16f1847.portb1 p16f1847.MCLR RST.A ResetPullUp.pin
+attach reset portb1 MCLR RST.A ResetPullUp.pin
 attach ground GND.pin RST.B
 attach supply VCC.pin
 
@@ -89,6 +86,9 @@ attach voltref porta2
 
 # Add a test description (handled by tcltest)
 test macro description
+endm
+
+constraint macro name
 endm
 
 # Add a check (handled by tcltest)

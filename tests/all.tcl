@@ -173,8 +173,13 @@ proc tcltest::runstc {file} {
     if {![regexp {^\s*test\s+(.*)} $descline -> desc]} {
 	set desc [lrange $descline 0 1]
     }
+    set constraints {}
+    foreach line [lsearch -regexp -inline -all $lines {^\s*constraint\s+(.*)}] {
+	lappend constraints {*}[lrange $line 1 end]
+    }
     set result [lsearch -regexp -inline -all $lines {^\s*(check|mark|eeprom|analyze)\s*(.*)}]
-    test $name $desc -body [list gpsim $file] -match gpsim -result [join $result \n]
+    test $name $desc -constraints $constraints -body [list gpsim $file] \
+      -match gpsim -result [join $result \n]
 }
 
 proc tcltest::gpsim {file} {
@@ -332,6 +337,9 @@ if {[info exists env(GPSIM)]} {
     set gpsim $env(GPSIM)
 } else {
     set gpsim [auto_execok gpsim]
+}
+if {[info exists env(PIC)]} {
+    testConstraint $env(PIC) 1
 }
 lappend gpsim -L $dir -I [file join $dir setup.stc]
 #lappend gpsim -L $dir -I [file join $dir setup33.stc]
