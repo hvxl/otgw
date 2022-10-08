@@ -5,7 +5,7 @@
 
 #define		version		"6.1"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"10"	;Comment out when not applicable
+#define 	patch		"11"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -456,10 +456,12 @@ statusflags	res	1			;Master status flags
 #define		CH2ModeOff	statusflags,4	;Must match ID0:HB4
 
 gpioflags	res	1			;General bit flags
-#define		PrioMsgWrite	gpioflags,0
+#define		HighPower	gpioflags,0	;Must match ReceiveModeT
 #define		VirtualLedE	gpioflags,1	;Must be bit 1
 #define		VirtualLedF	gpioflags,2	;Must be bit 2
-#define		gpioaway	gpioflags,3
+#define		PrioMsgWrite	gpioflags,3
+#define		RaisedPower	gpioflags,4	;Must match TransmitMode
+#define		gpioaway	gpioflags,5
 #define		gpio_port1	gpioflags,6	;Must match PORTA,6
 #define		gpio_port2	gpioflags,7	;Must match PORTA,7
 #define		gpio_mask	gpioflags
@@ -1489,7 +1491,13 @@ ReportPower	bcf	PowerReport	;Print the report only once
 		banksel	0		;Bank 0
 		skpc
 		return			;Don't report the power change
-ReportPowerJ1	lcall	PrintPowerlevel
+ReportPowerJ1	movfw	tstatflags	;Get the current smart power level
+		xorwf	gpioflags,W	;Compare against the last report
+		andlw	b'00010001'	;Only check the smart power bits
+		skpnz			;Was there any change?
+		return
+		xorwf	gpioflags,F	;Remember what will be reported
+		lcall	PrintPowerlevel
 		call	PrintStringNL	;Print the new power setting
 		pagesel	$
 		return
