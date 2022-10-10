@@ -3,9 +3,9 @@
 
 ;Copyright (c) 2022 - Schelte Bron
 
-#define		version		"6.1"
+#define		version		"6.2"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"12"	;Comment out when not applicable
+;#define 	patch		"12"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -53,15 +53,21 @@
 ;		return to the thermostat's normal programming.
 ;SB=15.5	Configure the setback temperature to use in combination with
 ;		GPIO functions HOME (5) and AWAY (6).
-;CS=10.0	Override the control setpoint from the thermostat
-;VS=25		Override the ventilation setpoint from the thermostat
+;CS=10.0	Override the control setpoint from the thermostat.
+;CH=1		Override the CH enable bit when CS != 0
+;VS=25		Override the ventilation setpoint from the thermostat.
 ;MM=40		Override the maximum relative modulation from the thermostat
 ;SH=72.0	Set the maximum central heating setpoint.
 ;SW=60.0	Set the domestic hot water setpoint.
 ;SC=14:45/6	Set the clock and the day of the week, 1 = Monday, 7 = Sunday
-;VR=3		Adjust the reference voltage between 0.6V and 2.5V
-;HW=1		Control DHW. P to start manual DHW push.
-;		Use T or A to let the thermostat control DHW.
+;VR=5		Adjust the reference voltage between 0.8V and 2.0V
+;HW=1		Control DHW. P to start manual DHW push. A or T for thermostat.
+;CL=62.5	Override the cooling control signal from the thermostat.
+;CE=1		Override the cooling enable bit when CL != 0
+;RR=2		Issue a remote request to the boiler.
+;MW=3		Set the Remote Override Operating Mode DHW.
+;MH=4		Set the Remote Override Operating Mode for CH1.
+;M2=5		Set the Remote Override Operating Mode for CH2.
 ;LA=F		Configure the function for LED A, defaults to Flame on
 ;LB=X		Configure the function for LED B, defaults to Transmitting
 ;LC=O		Configure the function for LED C, defaults to Setpoint Override
@@ -134,13 +140,13 @@
 ;		WBH: Domestic hot water burner operation hours
 ;		WPS: Domestic hot water pump starts
 ;		WPH: Domestic hot water pump operation hours
-;GW=1		Switch between monitor (0) and gateway (1) mode
+;GW=1		Switch between monitor (0) and gateway (1) mode. GW=R reset.
 ;IT=1		Control whether multiple mid-bit line transitions are ignored.
 ;		Normally more than one such transition results in Error 01.
 ;OH=0		Copy the low byte of MsgID 100 also into the high byte to work
 ;		with thermostats that look at the wrong byte (Honeywell Vision)
 ;FT=D		Force thermostat model to Remeha Celcia 20 (C) or iSense (I).
-;DP=1F		Set the debug pointer to the specified file register
+;DP=115		Set the debug pointer to the specified file register
 
 ;#######################################################################
 ; Peripheral use
@@ -2200,6 +2206,8 @@ PrintPowerlevel	btfss	TransmitMode
 
 PrintSettingR	call	PrintSettingID
 PrintRemeha	movlw	'D'
+		btfsc	TStatManual
+		movlw	'S'
 		btfsc	TStatRemeha
 		movlw	'R'
 		btfsc	TStatCelcia
@@ -4410,6 +4418,9 @@ SetTStatModel	movfw	rxpointer
 		xorlw	'C' ^ 'I'	;I=ISense
 		skpnz
 		bsf	TStatISense
+		xorlw	'C' ^ 'S'	;S=Standard
+		skpnz
+		bsf	TStatManual
 		tstf	remehaflags	;No set bits means auto-detection
 		skpz
 		bsf	TStatManual	;Thermostat model set manually
