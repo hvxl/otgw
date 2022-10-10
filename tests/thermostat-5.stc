@@ -28,3 +28,5 @@ Serial.tx = "SH=55\r"
 go 96000000
 check R.000.... R00000000
 check R.001.... R10010000
+
+eeprom 17 55.0

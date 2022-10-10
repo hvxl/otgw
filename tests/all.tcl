@@ -260,22 +260,35 @@ namespace eval tcltest::check {
 	variable position 0
     }
 
-    proc eeprom {addr value} {
+    proc eeprom {addr args} {
 	variable data
 	variable position
 	set pattern {^=+  EEPROM  DUMP  =+$\n(.*)\n^={74}$}
 	if {[regexp -lineanchor -start $position $pattern $data -> dump]} {
 	    foreach line [split $dump \n] {
 		if {[scan $line {%x: %n} start pos] != 2} continue
-		if {$addr < $start + 16} {
-		    set list [string range $line $pos [expr {$pos + 46}]]
-		    scan [lindex $list [expr {$addr - $start}]] %x val
-		    if {$val == $value} return
-		    break
-		}
+		lappend ee {*}[string range $line $pos [expr {$pos + 46}]]
 	    }
 	}
-	failed
+	foreach arg $args {
+	    if {[string is integer -strict $arg]} {
+		set expect [list $arg]
+	    } elseif {[string is double -strict $arg]} {
+		set arg [expr {round($arg * 256) + ($arg < 0 ? 65536 : 0)}]
+		set expect [list [expr {$arg / 256}] [expr {$arg % 256}]]
+	    } else {
+		binary scan [encoding convertto utf-8] cu* expect
+	    }
+	    foreach value $expect {
+		scan [lindex $ee $addr] %x val
+		if {$val != $value} {
+		    puts "EEPROM address $addr = $val, expected $value"
+		    failed
+		}
+		incr addr
+	    }
+	}
+	return
     }
 
     proc analyze {} {
@@ -286,6 +299,7 @@ namespace eval tcltest::check {
 		    incr msg([string index $line 0])
 		}
 		{Error 0[1-4]} {
+		    puts "Error report: $line"
 		    failed
 		}
 		{Thermostat report} {
@@ -296,24 +310,33 @@ namespace eval tcltest::check {
 		    set rcvd T
 		    set sent B
 		}
-		{Messages sent} {
+		{Messages sent *} {
 		    scan [string range $line 20 end] %d count
-		    if {$msg($sent) != $count} failed
+		    if {$msg($sent) != $count} {
+			puts "Mismatch of sent messages: $msg($sent) of $count"
+			failed
+		    }
 		}
-		{Messages received} {
+		{Messages received *} {
 		    scan [string range $line 20 end] %d count
-		    if {$msg($rcvd) != $count} failed
+		    if {$msg($rcvd) != $count} {
+			puts "Mismatch of received messages: $msg($rcvd) of $count"
+			failed
+		    }
 		}
-		{Stop bit errors} -
-		{Parity errors} -
-		{Data bit errors} -
-		{Wrong direction} -
-		{Invalid messages} -
-		{Missing response} -
-		{DataID mismatch} -
-		{Multiple responses} {
+		{Stop bit errors *} -
+		{Parity errors *} -
+		{Data bit errors *} -
+		{Wrong direction *} -
+		{Invalid messages *} -
+		{Missing response *} -
+		{DataID mismatch *} -
+		{Multiple responses *} {
 		    scan [string range $line 20 end] %d count
-		    if {$count != 0} failed
+		    if {$count != 0} {
+			puts "Error: [string trim [string range $line 0 19]]"
+			failed
+		    }
 		}
 	    }
 	}

@@ -5,7 +5,7 @@
 
 #define		version		"6.1"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"11"	;Comment out when not applicable
+#define 	patch		"12"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -1193,6 +1193,15 @@ WaitConvert	btfsc	ADCON0,GO	;Check that A/D conversion is finished
 		;Configure comparator module
 		pcall	SetupCompModule
 
+		call	ReadEpromNext
+		movwf	dhwsetpoint1
+		call	ReadEpromNext
+		movwf	dhwsetpoint2
+		call	ReadEpromNext
+		movwf	maxchsetpoint1
+		call	ReadEpromNext
+		movwf	maxchsetpoint2
+
 		banksel	RCSTA		;Bank 3
 		btfss	FailSafeMode
 		bsf	RCSTA,CREN	;Enable serial receive
@@ -1631,6 +1640,8 @@ EepromWait
 		movfw	temp2		;Restore original W register value
 		goto	EepromWait	;Wait some more
 
+ReadEpromNext	banksel	EEADRL
+		incf	EEADRL,W
 ReadEpromData	call	EepromWait	;Wait for any pending EEPROM activity
 		clrf	EECON1		;Read from DATA EEPROM
 		movwf	EEADRL		;Setup the EEPROM data address
@@ -1742,6 +1753,8 @@ ThermostatEnd	btfss	MonitorMode	;Can't send messages in monitor mode
 		call	SelectMessage	;Get a message to send from the table
 		movwf	byte2
 		lcall	CreateRequest	;Apply special treatment
+		;PCLATH may have been changed to the Print package by SetParity
+		pagesel	Message		;Prepare for calling StoreValue
 		btfsc	byte1,4		;For Write-Data messages, ...
 		call	StoreValue	;... store the value we're sending
 		movfw	byte2
@@ -1797,13 +1810,13 @@ CalcThresholdL1	skpnc
 ;************************************************************************
 
 		package	Print
-PrintString	pcall	ReadEpromData	;Read character from EEPROM
+PrintString	lcall	ReadEpromData	;Read character from EEPROM
+PrintStringNext	pagesel	$
 		skpnz
 		return			;End of string
 		call	PrintChar	;Send character to serial port
-		banksel	EEADRL		;Bank 3
-		incf	EEADRL,W	;Next address
-		goto	PrintString
+		lcall	ReadEpromNext
+		bra	PrintStringNext
 
 PrintStringNL	call	PrintString
 NewLine		movlw	0x0d
@@ -2216,11 +2229,10 @@ PrintGPIO	swapf	GPIOFunction,W
 		goto	PrintHex
 
 PrintSettingS	call	PrintSettingID
-PrintSetback	movlw	AwaySetpoint1
+PrintSetback	movlw	AwaySetpoint
 		pcall	ReadEpromData
 		movwf	float1
-		movlw	AwaySetpoint2
-		pcall	ReadEpromData
+		pcall	ReadEpromNext
 		movwf	float2
 		goto	PrintFloat
 
@@ -2991,7 +3003,8 @@ InvalidHotWater	tstf	dhwsetpoint1
 		return
 		clrf	dhwsetpoint1	;Zap the invalid value
 		clrf	dhwsetpoint2
-		return
+		movlw	DHWSetting	;EEPROM address
+		bra	ClearFloat
 
 ;Pass on user defined boundaries for central heating to the boiler
 MessageID57	btfsc	MsgResponse
@@ -3026,6 +3039,10 @@ InvalidHeating	tstf	maxchsetpoint1
 		return
 		clrf	maxchsetpoint1	;Zap the invalid value
 		clrf	maxchsetpoint2
+		movlw	MaxCHSetting	;EEPROM address
+ClearFloat	clrf	float1
+		clrf	float2
+		pcall	StoreFloat
 		return
 
 ; Control setpoint ventilation / heat-recovery
@@ -3911,12 +3928,8 @@ SetSetBack	call	GetPosFloatArg	;Parse floating point value
 		return
 		skpnz			;Zero has special meaning in the code
 		retlw	SyntaxError	;Setpoint cannot be zero or below
-		movlw	AwaySetpoint1	;EEPROM address for units
-		call	WriteEpromData	;Save in EEPROM
-		movfw	float2
-		movwf	temp
-		movlw	AwaySetpoint2	;EEPROM address for fraction
-		call	WriteEpromData	;Save in EEPROM
+		movlw	AwaySetpoint	;EEPROM address
+		call	StoreFloat	;Store a float value in EEPROM
 		goto	CommandFloat
 
 SetHotWaterTemp	call	GetFloatArg
@@ -3942,6 +3955,8 @@ HotWaterFinish	movfw	float2
 		movwf	dhwsetpoint2
 		movfw	float1
 		movwf	dhwsetpoint1
+		movlw	DHWSetting	;EEPROM address
+		call	StoreFloat	;Store a float value in EEPROM
 		goto	CommandFloat
 
 SetHeatingTemp	call	GetFloatArg
@@ -3967,6 +3982,8 @@ HeatingFinish	movfw	float2
 		movwf	maxchsetpoint2
 		movfw	float1
 		movwf	maxchsetpoint1
+		movlw	MaxCHSetting	;EEPROM address
+		call	StoreFloat	;Store a float value in EEPROM
 		goto	CommandFloat
 
 SetCtrlSetpoint	call	GetPercentArg
@@ -4297,6 +4314,15 @@ SaveConfig	movfw	conf
 		movwf	temp
 		movlw	Configuration
 		goto	WriteEpromData
+
+StoreFloat	pcall	EepromWait	;Wait for any pending EEPROM activity
+		movwf	EEADR		;Setup the EEPROM data address
+		movfw	float1		;Get units
+		call	StoreEpromData	;Store in EEPROM
+		pcall	EepromWait	;Wait for any pending EEPROM activity
+		incf	EEADR,F		;Move to next address
+		movfw	float2		;Get fraction
+		bra	StoreEpromData
 
 SaveSettings	movwf	temp
 		movlw	SavedSettings
@@ -5068,11 +5094,10 @@ gpio_security	andwf	gpio_mask,W	;Apply the GPIO port mask
 gpio_armed	btfsc	gpioaway	;Did the port change since last check?
 		return			;Nothing to do
 		bsf	gpioaway	;Security system is armed
-		movlw	AwaySetpoint1	;EEPROM address of the away setpoint
+		movlw	AwaySetpoint	;EEPROM address of the away setpoint
 		lcall	ReadEpromData	;Get the setpoint from EEPROM
 		movwf	float1		;Configure the remote setpoint
-		movlw	AwaySetpoint2	;EEPROM address of the away setpoint
-		call	ReadEpromData	;Get the setpoint from EEPROM
+		call	ReadEpromNext	;Get the setpoint from EEPROM
 		movwf	float2		;Configure the remote setpoint
 		movlw	b'01'		;Temperature override mode: Continue
 gpio_setpoint	pcall	SetSetPoint	;Set setpoint
@@ -5085,8 +5110,7 @@ gpio_setpoint	pcall	SetSetPoint	;Set setpoint
 		org	0xf000
 SavedSettings	de	23 | 1 << 5 | 1 << 6	;Set IgnoreErr1 and OverrideHigh
 FunctionGPIO	de	GPIO_NONE | GPIO_NONE << 4
-AwaySetpoint1	de	16
-AwaySetpoint2	de	0
+AwaySetpoint	de	16, 0
 PrintSettingL	de	"L="
 #ifdef LVP
 FunctionLED1	de	'-'
@@ -5103,6 +5127,8 @@ FunctionLED6	de	'C'
 NullString	de	0
 TStatModel	de	0
 Configuration	de	0
+DHWSetting	de	0, 0	;Must immediately follow Configuration
+MaxCHSetting	de	0, 0	;Must immediately follow DHWSetting
 
 PrintSettingA	de	"A="
 GreetingStr	de	"OpenTherm Gateway ", version

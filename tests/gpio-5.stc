@@ -19,8 +19,10 @@ go 10000000
 check {A.009....} AC0090000
 
 mark
+Serial.tx = "PR=S\r"
 Away.state = closed
 go 18000000
+check "PR: S=18.23"
 check {A.009....} A4009123B
 
 mark

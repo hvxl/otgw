@@ -6,6 +6,6 @@ load smartpower.stc
 go 1200000
 
 Serial.tx = "GW=0\r"
-go 30000000
+go 30200000
 
 analyze
