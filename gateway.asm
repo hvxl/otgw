@@ -437,13 +437,13 @@ override	res	1
 
 initflags	res	1
 ;----- initflags bits -------------------------------------------------
-INITHW		equ	0	;InitHotWater	;Must match ID6:HB0
-INITCH		equ	1	;InitHeating	;Must match ID6:HB1
-INITRP		equ	2	;InitParameter
-INITSW		equ	3	;WaterSetpoint
-INITSH		equ	4	;MaxHeatSetpoint
-INITRR		equ	5	;RemoteReq
-INITOM		equ	6	;OperModes
+INITSW		equ	0	;WaterSetpoint	;Must match ID6:HB0
+INITSH		equ	1	;MaxHeatSetpoint;Must match ID6:HB1
+INITRR		equ	2	;RemoteReq
+INITOM		equ	3	;OperModes
+INITHW		equ	4	;InitHotWater	;Match swapped ID6:HB0?
+INITCH		equ	5	;InitHeating	;Match swapped ID6:HB1?
+INITRP		equ	6	;InitParameter
 INITNR		equ	7	;NoResetUnknown
 
 onoffflags	res	1			;General bit flags
@@ -711,7 +711,7 @@ inputboiler	tstf	bitcount	;Is a message in progress?
 		call	SwitchOffLED	;Switch off the receive LED
 		movlw	'T'		;Thermostat function
 		call	SwitchOffLED	;Switch off the thermostat LED
-		movlw	'B'		;Boiler function
+;		movlw	'B'		;Boiler function
 		call	SwitchOffLED	;Switch off the boiler LED
 		pagesel	Interrupt
 		bcf	Request		;Thermostat is done
@@ -729,7 +729,7 @@ inputabort	clrf	bitcount	;Abort message
 		pagesel	Message
 		movlw	'X'
 		call	SwitchOffLED	;Switch off transmit LED
-		movlw	'B'
+;		movlw	'B'
 		call	SwitchOffLED	;Switch off boiler LED
 		pagesel	Interrupt
 		goto	restarttimer	;Reset T2 and 1/4 ms counter
@@ -789,9 +789,9 @@ StartBit	tstf	quarter		;Check if pulse was less than 250us
 		pagesel	Message
 		movlw	'R'		;Receive function
 		call	SwitchOnLED	;Turn on the receive LED
+;		movlw	'T'		;Thermostat function
+		btfss	Request
 		movlw	'B'		;Boiler function
-		btfsc	Request
-		movlw	'T'		;Thermostat function
 		call	SwitchOnLED	;Switch on the boiler or thermostat LED
 		pagesel	Interrupt
 		movlw	33		;Message length: 32 bits + stop bit - 1
@@ -881,7 +881,7 @@ timer2xmitend	bcf	T2CON,TMR2ON	;Stop timer 2
 		call	SwitchOffLED	;Switch off the transmit LED
 		movlw	'T'		;Thermostat function
 		call	SwitchOffLED	;Switch off the thermostat LED
-		movlw	'B'		;Boiler function
+;		movlw	'B'		;Boiler function
 		call	SwitchOffLED	;Switch off the boiler LED
 		pagesel	Interrupt
 		return			;Return from the interrupt routine
@@ -972,7 +972,7 @@ errorcleanup	tstf	errornum
 		call	SwitchOffLED	;Switch off the transmit LED
 		movlw	'R'
 		call	SwitchOffLED	;Switch off the receive LED
-		movlw	'B'
+;		movlw	'B'
 		call	SwitchOffLED	;Switch off the boiler LED
 		movlw	'T'
 		call	SwitchOffLED	;Switch off the thermostat LED
@@ -1201,10 +1201,14 @@ WaitConvert	btfsc	ADCON0,GO	;Check that A/D conversion is finished
 
 		call	ReadEpromNext
 		movwf	dhwsetpoint1
+		skpz
+		bsf	initflags,INITSW
 		call	ReadEpromNext
 		movwf	dhwsetpoint2
 		call	ReadEpromNext
 		movwf	maxchsetpoint1
+		skpz
+		bsf	initflags,INITSH
 		call	ReadEpromNext
 		movwf	maxchsetpoint2
 
@@ -1240,7 +1244,7 @@ WaitConvert	btfsc	ADCON0,GO	;Check that A/D conversion is finished
 		;Some boilers support MsgID 48 and/or MsgID 49, while they
 		;don't support MsgID 6 (For example: Bosch HRC 30)
 		movlw	(1 << INITRP) | (1 << INITHW) | (1 << INITCH) | (1 << INITOM)
-		movwf	initflags	;Nothing has been initialized yet
+		iorwf	initflags,F	;Nothing has been initialized yet
 		movlw	MIN_DHWSETPOINT
 		movwf	dhwsetpointmin
 		movlw	MAX_DHWSETPOINT
@@ -1397,8 +1401,8 @@ SerialEventJmp1	call	SerialReceive
 		clrf	rxpointer	;Prepare for a new command
 		bcf	CommandComplete
 		pagesel	Print
-		iorlw	0
-		skpz
+		iorlw	0		;Check exit code
+		skpz			;No need to print a string from EEPROM
 		call	PrintString	;Print the result
 		call	NewLine
 		pagesel	$
@@ -1476,7 +1480,7 @@ SendMessage	movlw	1
 		movlw	'X'		;Transmit function
 		pagesel	Message
 		call	SwitchOnLED	;Switch on the transmit LED
-		movlw	'T'		;Thermostat function
+;		movlw	'T'		;Thermostat function
 		btfss	MsgResponse
 SendBoiler	movlw	'B'		;Boiler function
 		; In package Message
@@ -1849,7 +1853,7 @@ PrintChar	tstf	txavailable	;Check if some data is already waiting
 		banksel	TXREG		;Bank 3
 		movwf	TXREG		;Can transmit immediately
 		banksel	0		;Bank 0
-		retlw	0
+		retlw	0		;Exit code for SerialCommand
 PrintBuffer	movwf	FSR0L		;Abuse FSR0L for temporary storage
 		movfw	txpointer	;Current position in the transmit buffer
 		addwf	txavailable,W	;Add number of pending characters
@@ -1867,7 +1871,7 @@ PrintBuffer	movwf	FSR0L		;Abuse FSR0L for temporary storage
 		xorlw	TXBUFSIZE	;Compare against buffer size
 		skpz			;Buffer full?
 		incf	txavailable,F	;One more character in the buffer
-		retlw	0
+		retlw	0		;Exit code for SerialCommand
 
 PrintRcvdMsg	movlw	'T'
 		btfsc	MsgResponse
@@ -2325,12 +2329,15 @@ SendAltRequest	btfsc	SendUserMessage	;Not sending a user message?
 		call	TreatMessage	;Process the alternative message
 		goto	SetParity	;Calculate the parity of the new message
 
-StoreRequest	movfw	byte3
+UpdateRequest	btfsc	OverrideUsed
+		bra	StoreDataBytes
+		return
+StoreRequest	movfw	byte1
+		movwf	originaltype	;Save the original message type
+StoreDataBytes	movfw	byte3	
 		movwf	databyte1	;Save original data byte #1
 		movfw	byte4
 		movwf	databyte2	;Save original data byte #2
-		movfw	byte1
-		movwf	originaltype	;Save the original message type
 		return
 
 ;Vendor specific ID's can go through the code below without causing any trouble
@@ -2779,17 +2786,21 @@ MessageID5	btfsc	MsgResponse	;Only interested in requests
 ;DataID 6: Remote Boiler Parameter flags
 ;If the boiler doesn't support the DHW Setpoint or Max CH Setpoint parameters,
 ;the gateway will simulate read access.
+;Some boilers (Vaillant hrSolide VHR NL 24-28C/3 C, Bulex FAS, Windhager BWE
+;100 Exklusiv Bj2006) will indicate they don't support the Max CH setpoint
+;parameter. Yet they return resonable data for MsgID 49. For this reason the
+;bounds are still collected, even if MsgID 6 says they are not supported.
 MessageID6	btfss	MsgResponse
 		return
 		clrw			;Assume no support for remote-parameters
 		btfss	byte1,5
 		btfsc	byte1,4
 		goto	parameterupdate	;No ReadAck
-		movfw	byte3		;Get the remote-parameter transfer flags
+		movfw	byte4		;Get the remote-parameter r/w flags
 		iorlw	~b'11'		;Only consider the DHW and max CH flags
 		btfsc	initflags,INITRP;Parameter initialization already done?
 		andwf	initflags,F	;Don't request unsupported parameters
-		movfw	byte4		;Get the remote-parameter r/w flags
+;		movfw	byte4		;Get the remote-parameter r/w flags
 parameterupdate	xorwf	onoffflags,W
 		andlw	b'11'
 		xorwf	onoffflags,F
@@ -2995,7 +3006,7 @@ SetWaterSet	movlw	T_WRITE
 		retlw	MSG_DHWSETPOINT	;Return MsgID when used as alternative
 hotwaterreturn	bcf	initflags,INITSW
 		btfss	byte1,5
-		return
+		goto	UpdateRequest
 		btfss	byte1,4
 		goto	InvalidHotWater	;Boiler didn't respond with DataInvalid
 		;Boiler does not support the message
@@ -3031,7 +3042,7 @@ SetHeatingSet	movlw	T_WRITE
 		retlw	MSG_MAXCHSETPOINT ;Return MsgID when used as alternative
 maxchsetptret	bcf	initflags,INITSH
 		btfss	byte1,5
-		return			;Boiler was happy with the message
+		goto	UpdateRequest	;Boiler was happy with the message
 		btfss	byte1,4
 		goto	InvalidHeating
 		;Boiler does not support the message
@@ -3081,7 +3092,7 @@ ID99WriteAck	bcf	opermodewrite
 OperModeFlag	movfw	byte3
 		xorwf	operatingmode1,W
 		andlw	1 << 4		;DHW push bit
-		xorwf   operatingmode1,F
+		xorwf	operatingmode1,F
 OperModeAck	bcf	initflags,INITOM;Oper modes request has been answered
 		call	messageack	;Turn request into corresponding ack
 OperModeData	movfw	operatingmode1
@@ -3262,14 +3273,14 @@ AdminMessages	bsf	tempvar0,INITRP
 		btfsc	initflags,INITSH
 		goto	SetHeatingSet
 		bsf	tempvar0,INITOM
-		btfsc   initflags,INITOM
+		btfsc	initflags,INITOM
 		retlw	MSG_OPERMODES
 		bsf	tempvar0,INITRR
 		btfss	initflags,INITRR
 		retlw	0
 		movfw	requestcode
 		movwf	byte3
-		retlw   MSG_REMOTECMD
+		retlw	MSG_REMOTECMD
 
 SendPriorityMsg	btfss	PriorityMsg
 		goto	InitDone
@@ -3495,23 +3506,23 @@ SwitchOnLED	addlw	functions - 'A'	;Point into the table of functions
 		movlw	b'11111110'	;Mask off the state bit
 		andwf	INDF0,W		;Get the LED(s) for the function
 		skpnz
-		return			;No LED is assigned to this function
+		retlw	'T'		;No LED is assigned to this function
 		xorlw	-1		;Invert the bitmask
 		andwf	PORTB,F		;Switch on the LED
 		iorlw	~b'110'
 		andwf	gpioflags,F	;Switch on virtual LEDs E/F
-		retlw	0
+		retlw	'T'		;Save some movlw 'T' instructions
 
 SwitchOffLED	addlw	functions - 'A'	;Point into the table of functions
 		movwf	FSR0L		;Setup indirect addressing
 		bcf	INDF0,0		;Remember that this function is off
 		movfw	INDF0		;Get the LED for the function
 		skpnz
-		return			;No LED is assigned to this function
+		retlw	'B'		;No LED is assigned to this function
 		iorwf	PORTB,F		;Switch off the LED
 		andlw	b'110'
 		iorwf	gpioflags,F	;Switch off virtual LEDs E/F
-		retlw	0
+		retlw	'B'		;Save some movlw 'B' instructions
 
 ;************************************************************************
 ; Parse commands received on the serial interface
@@ -4418,7 +4429,7 @@ SetTStatModel	movfw	rxpointer
 		xorlw	'C' ^ 'I'	;I=ISense
 		skpnz
 		bsf	TStatISense
-		xorlw	'C' ^ 'S'	;S=Standard
+		xorlw	'I' ^ 'S'	;S=Standard
 		skpnz
 		bsf	TStatManual
 		tstf	remehaflags	;No set bits means auto-detection

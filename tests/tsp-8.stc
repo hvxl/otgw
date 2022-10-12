@@ -1,5 +1,5 @@
 test "Write FHB"
-constraint pic16f1847
+constraint p16f1847
 
 load boiler.stc
 Boiler.TSP = "12: 42, 88, 17"

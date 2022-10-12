@@ -356,6 +356,7 @@ namespace eval tcltest {
 
 namespace import tcltest::*
 
+set setupsearch {}
 if {[info exists env(GPSIM)]} {
     set gpsim $env(GPSIM)
 } else {
@@ -363,8 +364,11 @@ if {[info exists env(GPSIM)]} {
 }
 if {[info exists env(PIC)]} {
     testConstraint $env(PIC) 1
+    lappend setupsearch $env(PIC).stc
 }
-lappend gpsim -L $dir -I [file join $dir setup.stc]
+lappend setupsearch setup.stc
+lassign [glob -directory $dir {*}$setupsearch] setup
+lappend gpsim -L $dir -I $setup
 #lappend gpsim -L $dir -I [file join $dir setup33.stc]
 configure -verbose tpbe -singleproc 1 -testdir $dir {*}$argv
 runstctests $gpsim

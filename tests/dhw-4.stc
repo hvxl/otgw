@@ -1,5 +1,5 @@
 test "Manual DHW push"
-constraint pic16f1847
+constraint p16f1847
 
 load boiler.stc
 load thermostat.stc

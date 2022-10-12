@@ -1,5 +1,5 @@
 test "Write TSP with thermostat interfering"
-constraint pic16f1847
+constraint p16f1847
 
 load boiler.stc
 Boiler.TSP = "10: 42, 88, 17"

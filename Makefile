@@ -1,6 +1,6 @@
 # -*- make -*-
 
-PIC = pic16f1847
+PIC = p16f1847
 SCRIPT = 16f1847.lkr
 PROJECT = gateway
 OTGWOBJECTS = gateway.o ds1820.o selfprog.o
