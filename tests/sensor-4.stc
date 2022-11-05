@@ -24,6 +24,6 @@ Serial.tx = "PR=D\r"
 go 16000000
 check A401C1BF0
 reg(valuestorage+32)
-check {REG[[:xdigit:]]{1,3}\[0x[[:xdigit:]]{1,3}\] = (0x\S+)} {0x1b}
+check {REG[[:xdigit:]]+\[0x[[:xdigit:]]+\] = (0x\S+)} {0x1b}
 reg(valuestorage+33)
-check {REG[[:xdigit:]]{1,3}\[0x[[:xdigit:]]{1,3}\] = (0x\S+)} {0xf0}
+check {REG[[:xdigit:]]+\[0x[[:xdigit:]]+\] = (0x\S+)} {0xf0}

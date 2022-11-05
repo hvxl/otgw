@@ -27,7 +27,7 @@ go 17000000
 # gpsim doesn't like a literal comma in the arguments. So we use \x2c.
 check {([\d.]+)\x2c39\.50} "5.00"
 reg(valuestorage+30)
-check {REG[[:xdigit:]]{1,3}\[0x[[:xdigit:]]{1,3}\] = (0x\S+)} {0x5}
+check {REG[[:xdigit:]]+\[0x[[:xdigit:]]+\] = (0x\S+)} {0x5}
 reg(valuestorage+31)
-check {REG[[:xdigit:]]{1,3}\[0x[[:xdigit:]]{1,3}\] = (0x\S+)} {0x0}
+check {REG[[:xdigit:]]+\[0x[[:xdigit:]]+\] = (0x\S+)} {0x0}
 
