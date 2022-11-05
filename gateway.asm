@@ -655,9 +655,9 @@ InterruptVector	code	0x0004
 
 ;Comparator interrupt routine
 inputint	comf	tstatflags,W	;Get the inverted Smart power bits
-		banksel	CMOUT
+		banksel	CMOUT		;Bank 2
 		xorwf	CMOUT,W		;Read to end the mismatch condition
-		banksel	PIR2
+		banksel	PIR2		;Bank 0
 		bcf	PIR2,C1IF	;Clear the interrupt, if comparator 1
 		bcf	PIR2,C2IF	;Clear the interrupt, if comparator 2
 		xorwf	msgflags,W	;Determine which comparator has changed
@@ -996,7 +996,7 @@ Break
 		btfsc	NoBreak
 		goto	Restart2
 		clrf	BreakTimer	;Reset break-free timer
-		banksel	0		;Bank 0
+		movlb	0		;Bank 0
 		goto	MainLoop	;continue running the mainloop
 Restart1
 		banksel	resetreason	;Bank 1
@@ -1384,14 +1384,14 @@ MainLoop	clrwdt
 		tstf	RCREG		;Check received char is 0
 		skpnz
 		goto	Break		;Real break
-		banksel	0		;Bank 0
+		movlb	0		;Bank 0
 		goto	MainLoop	;Framing error (baud rate mismatch)
 
 SerialEvent	btfss	RCSTA,OERR	;Check for overrun error
 		goto	SerialEventJmp1
 		bcf	RCSTA,CREN	;Procedure to clear an overrun error
 		bsf	RCSTA,CREN	;Re-enable the serial interface
-		banksel	0
+		movlb	0		;Bank 0
 		bsf	Overrun		;Remember for later reporting
 		goto	MainLoop
 SerialEventJmp1	call	SerialReceive
@@ -1427,15 +1427,15 @@ ClearBankLoop	clrf	INDF0
 
 ;Callers depend on this function never setting the carry bit
 SerialReceive
-		banksel	rxpointer
+		banksel	rxpointer	;Bank 0
 		movlw	high rxbuffer
 		movwf	FSR1H
 		movfw	rxpointer
 		addlw	rxbuffer
 		movwf	FSR1L
-		banksel	RCREG
+		banksel	RCREG		;Bank 3
 		movfw	RCREG
-		banksel	stateflags
+		banksel	stateflags	;Bank 0
 		btfsc	CommandComplete
 		return			;Not ready to accept a command now
 		movwf	INDF1
@@ -1507,7 +1507,7 @@ ReportPower	bcf	PowerReport	;Print the report only once
 		banksel	LineVoltage	;Bank 1
 		movfw	LineVoltage	;Check the line voltage
 		subwf	VoltOpen,W	;Thermostat disconnected?
-		banksel	0		;Bank 0
+		movlb	0		;Bank 0
 		skpc
 		return			;Don't report the power change
 ReportPowerJ1	movfw	tstatflags	;Get the current smart power level
@@ -1568,7 +1568,7 @@ IdleTimer
 StartConversion
 		banksel	ADCON0		;Bank 1
 		bsf	ADCON0,GO	;Start A/D conversion
-		banksel	0		;Bank 0
+		movlb	0		;Bank 0
 		return
 
 FlashTimer	bcf	PIR1,TMR1IF	;Clear timer overrun flag
@@ -1650,14 +1650,14 @@ EepromWait
 		movfw	temp2		;Restore original W register value
 		goto	EepromWait	;Wait some more
 
-ReadEpromNext	banksel	EEADRL
+ReadEpromNext	banksel	EEADRL		;Bank 3
 		incf	EEADRL,W
 ReadEpromData	call	EepromWait	;Wait for any pending EEPROM activity
 		clrf	EECON1		;Read from DATA EEPROM
 		movwf	EEADRL		;Setup the EEPROM data address
 		bsf	EECON1,RD	;Start the EEPROM read action
 		movfw	EEDATL		;Read the data from EEPROM
-		banksel	0		;Switch back to bank 0
+		movlb	0		;Switch back to bank 0
 		return
 
 ;The Opentherm specification mentions the following special circumstance:
@@ -1745,7 +1745,7 @@ Disconnect	bsf	NoThermostat	;Thermostat has been disconnected
 		clrf	setpoint2
 		movlw	'P'
 		pcall	SwitchOffLED	;Switch off Raised Power LED
-		banksel	onoffflags
+		banksel	onoffflags	;Bank 0
 		return
 Unstable
 		banksel	onoffflags	;Bank 0
@@ -1852,7 +1852,7 @@ PrintChar	tstf	txavailable	;Check if some data is already waiting
 		goto	PrintBuffer	;Need to put the byte into the buffer
 		banksel	TXREG		;Bank 3
 		movwf	TXREG		;Can transmit immediately
-		banksel	0		;Bank 0
+		movlb	0		;Bank 0
 		retlw	0		;Exit code for SerialCommand
 PrintBuffer	movwf	FSR0L		;Abuse FSR0L for temporary storage
 		movfw	txpointer	;Current position in the transmit buffer
@@ -2962,7 +2962,7 @@ MessageID28	btfsc	MsgResponse	;Do not modify a request
 		movfw	returnwater1
 		call	setbyte3
 		movfw	returnwater2
-		banksel	0		;Bank 0
+		movlb	0		;Bank 0
 		goto	setbyte4
 
 ;Keep track of the boundaries for domestic hot water reported by the boiler
@@ -4206,7 +4206,7 @@ SetVoltageRef	movfw	rxpointer
 		addlw	13
 		banksel	DACCON1		;Bank 2
 		movwf	DACCON1
-		banksel	0		;Bank 0
+		movlb	0		;Bank 0
 		xorwf	settings,W
 		andlw	b'00011111'
 		xorwf	settings,W
@@ -4370,7 +4370,7 @@ StoreEpromData
 		bsf	INTCON,GIE	;Interrupts are allowed again
 		bcf	EECON1,WREN	;Prevent accidental writes
 StoreEpromSkip	movfw	EEDATL		;Return the byte that was written
-		banksel	0		;Bank 0
+		movlb	0		;Bank 0
 		return
 
 SetAlternative	call	GetDecimalArg	;Get the message number
@@ -4389,7 +4389,7 @@ SetAltLoop	pcall	ReadEpromData
 		banksel	EEADRL		;Bank 3
 		incfsz	EEADRL,W	;Slot not empty, try next position
 		goto	SetAltLoop
-		banksel	0		;bANK 0
+		movlb	0		;Bank 0
 		retlw	NoSpaceLeft	;No empty slot available
 StoreAlt	call	StoreEpromTemp
 		lgoto	PrintByte
@@ -4416,7 +4416,7 @@ DelAltLoop	pcall	ReadEpromData	;Read a byte from EEPROM
 		banksel	EEADR		;Bank 3
 		incfsz	EEADR,W		;Proceed to the next slot
 		goto	DelAltLoop	;Repeat the loop
-		banksel	0		;Bank 0
+		movlb	0		;Bank 0
 		retlw	NotFound	;The requested message ID was not found
 
 SetTStatModel	movfw	rxpointer
@@ -4487,6 +4487,7 @@ SetupCompModule	bcf	MonitorMode
 		movwf	CM1CON0		;Configure comparator 1
 		movwf	CM2CON0		;Configure comparator 2
 		bcf	ChangeMode	;Change has been applied
+		movlb	0		;Bank 0
 		return
 
 ResetGateway	moviw	3[FSR1]
@@ -5044,15 +5045,15 @@ gpio_onewire	movlw	b'11110000'
 		andwf	GPIOFunction,F	;Disable function on port 1
 gpio_input	movfw	gpio_mask	;Get the port mask
 		andlw	b'11000000'	;Mask of the other bits
-		banksel	TRISA
+		banksel	TRISA		;Bank 1
 		iorwf	TRISA,F		;Set the port to input
-		banksel	0
+		movlb	0		;Bank 0
 		return
 gpio_output	comf	gpio_mask,W	;Get the inverted port mask
 		iorlw	b'00111111'	;Set all other bits
-		banksel	TRISA
+		banksel	TRISA		;Bank 1
 		andwf	TRISA,F		;Set the port to output
-		banksel	0
+		movlb	0		;Bank 0
 		return
 gpio_initgnd	call	gpio_output	;Make the port an output
 		andwf	PORTA,F		;Pull the output low
