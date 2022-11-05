@@ -5,6 +5,7 @@ SCRIPT = 16f1847.lkr
 PROJECT = gateway
 OTGWOBJECTS = gateway.o ds1820.o selfprog.o
 DIAGOBJECTS = diagnose.o selfprog.o
+INTFOBJECTS = interface.o selfprog.o
 OUTPUT = $(PROJECT).hex
 COD = $(PROJECT).cod
 GPASM = gpasm
@@ -17,6 +18,9 @@ $(OUTPUT) $(COD): $(OTGWOBJECTS) $(SCRIPT)
 
 diagnose.hex: $(DIAGOBJECTS) $(SCRIPT)
 	$(GPLINK) --map -s $(SCRIPT) -o $@ $(DIAGOBJECTS)
+
+interface.hex: $(INTFOBJECTS) $(SCRIPT)
+	$(GPLINK) --map -s $(SCRIPT) -o $@ $(INTFOBJECTS)
 
 %.o: %.asm
 	$(GPASM) $(CFLAGS) -c $<
