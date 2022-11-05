@@ -5,7 +5,7 @@
 
 #define		version		"6.2"
 #define		phase		"."	;a=alpha, b=beta, .=production
-;#define 	patch		"12"	;Comment out when not applicable
+#define 	patch		"1"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -4166,6 +4166,8 @@ SetHotWater	movfw	rxpointer
 		sublw	'P'
 		skpnz
 		bra	SetHotWaterPush
+		clrf    dhwpushflags    ;Abort any manual DHW push
+		bcf     manualdhwpush
 		bcf	HotWaterSwitch
 		bcf	HotWaterEnable
 		addlw	'1' - 'P'
