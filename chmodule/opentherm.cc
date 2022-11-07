@@ -974,7 +974,7 @@ void Boiler::NewRxMessage(unsigned msg) {
 	int type = message >> 28 & 7;
 	switch (msg >> 28 & 7) {
 	 case kReadData:
-	    if (type == kDataInvalid) {
+	    if (type == kDataInvalid || type == kUnknownDataID) {
 		// Return the stored message unmodified
 	    } else {
 		// Return the data from the stored message in a Read-Ack
@@ -982,15 +982,16 @@ void Boiler::NewRxMessage(unsigned msg) {
 	    }
 	    break;
 	 case kWriteData:
-	    if (type == kDataInvalid) {
-		// Return the stored message unmodified
-	    } else {
+	    if (type == kWriteAck) {
 		// Return the data from the received message in a Write-Ack
 		message = kWriteAck << 28 | msgid << 16 | msg & 0xffff;
-		if (type == kWriteAck) {
-		    // Update the stored message with the received data
-		    response[msgid] = message;
-		}
+                // Update the stored message with the received data
+                response[msgid] = message;
+            } else if (type == kReadAck) {
+                // Return the data from the stored message in a Write-Ack
+                message = kWriteAck << 28 | msgid << 16 | message & 0xffff;
+	    } else {
+		// Return the stored message unmodified
 	    }
 	    break;
 	 case kInvalidData:

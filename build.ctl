@@ -1,6 +1,6 @@
 source	gateway.asm
 version	6.2
 phase	.
-patch	1
+patch	2
 bugfix	0
-build	4
+build	5

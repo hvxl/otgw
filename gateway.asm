@@ -5,7 +5,7 @@
 
 #define		version		"6.2"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"1"	;Comment out when not applicable
+#define 	patch		"2"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -480,6 +480,7 @@ remehaflags	res	1
 #define		TStatManual	remehaflags,4	;Thermostat model set manually
 
 dhwpushflags	res	1
+;Bits 0..2 are used as a counter to allow 8 attempts for the override to stick
 #define		dhwpushstarted	dhwpushflags,3
 #define		dhwpushspoof	dhwpushflags,4
 #define		dhwpushpending	dhwpushflags,5
@@ -490,8 +491,6 @@ heartbeatflags	res	1	;Can be moved to another bank, if necessary
 #define		HeartbeatSC	heartbeatflags,0
 #define		HeartbeatCS	heartbeatflags,1
 #define		HeartbeatC2	heartbeatflags,2
-
-;Bits 0..2 are used as a counter to allow 8 attempts for the override to stick
 
 errornum	res	1
 errortimer	res	1
@@ -3088,7 +3087,14 @@ ID99Unknown	btfsc	manualdhwpush	;No pending DHW push
 		bsf	dhwpushspoof	;Spoof DHW push
 		bra	OperModeAck
 
-ID99WriteAck	bcf	opermodewrite	
+ID99WriteAck	btfsc	dhwpushpending	;No pending request to start DHW push?
+		btfsc	byte3,4		;DHW push request denied?
+		bra	OperModeBoiler
+		bsf	dhwpushspoof	;OTGW will spoof the DHW push
+		bsf	byte3,4		;Overwrite the received DHW push bit
+		bsf	AlternativeUsed	;Message is modified
+OperModeBoiler	bcf	opermodewrite
+		bcf	dhwpushpending	;DHW push attempt is completed
 OperModeFlag	movfw	byte3
 		xorwf	operatingmode1,W
 		andlw	1 << 4		;DHW push bit
@@ -3107,14 +3113,21 @@ ID99ReadData	btfss	opermodewrite
 		bcf	OverrideUsed	;Changing more than just the data bytes
 		bra	OperModeData
 
-ID99ReadAck	btfss	initflags,INITOM
+ID99ReadAck	btfsc	initflags,INITOM
+		bra	ID99ReadInit	;Store the initial data from the boiler
+		btfss	byte3,4		;Boiler performing a DHW push?	
+		btfss	dhwpushspoof	;OTGW spoofing a DHW push?
 		bra	OperModeFlag
-		bcf	initflags,INITOM
+		bsf	byte3,4		;Overwrite the received DHW push bit
+		bsf	AlternativeUsed	;Message is modified
+		bra	OperModeAck
+
+ID99ReadInit	bcf	initflags,INITOM
 ID99WriteData	movfw	byte3
 		movwf	operatingmode1
 		movfw	byte4
 		movwf	operatingmode2
-		btfsc	byte4,4
+		btfsc	byte3,4
 StartDHWPush	btfsc	manualdhwpush
 		return			;DHW push is already in progress
 		bsf	manualdhwpush
@@ -3128,6 +3141,7 @@ PushOperModes	movlw	99
 		skpnz			;Data ID is not known to be unsupported
 		return
 		movlw	99
+		bsf	dhwpushpending	;Trying to initiate a DHW push
 		bsf	opermodewrite	;Perform write operation for MsgID99
 		goto	SetPriorityMsg	;Send ID 99 at the first opportunity
 
