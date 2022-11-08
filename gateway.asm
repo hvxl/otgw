@@ -5,7 +5,7 @@
 
 #define		version		"6.2"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"2"	;Comment out when not applicable
+#define 	patch		"3"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -460,6 +460,7 @@ statusflags	res	1			;Master status flags
 #define		CHModeOff	statusflags,0	;Must match ID0:HB0
 #define		CoolModeOff	statusflags,2	;Must match ID0:HB2
 #define		CH2ModeOff	statusflags,4	;Must match ID0:HB4
+#define		DHWBlocking	statusflags,6	;Must match ID0:HB6
 
 gpioflags	res	1			;General bit flags
 #define		HighPower	gpioflags,0	;Must match ReceiveModeT
@@ -510,6 +511,7 @@ boilercom	res	1
 conf		res	1			;Saved in EEPROM
 #define		MonModeSwitch	conf,MONMODEBIT
 #define		TempSensorFunc	conf,2
+#define		SummerMode	conf,3
 #define		HotWaterSwitch	conf,4
 #define		HotWaterEnable	conf,5
 
@@ -2632,6 +2634,10 @@ readstatus	call	MandatoryID	;Remove any blacklisting for the DataID
 		iorlw	1 << 2		;Manipulate cooling enable
 		btfss	SysCH2Setpoint
 		iorlw	1 << 4		;Enable central heating mode 2
+		btfsc	SummerMode
+		iorlw	1 << 5		;Summer mode active
+		btfsc	DHWBlocking
+		iorlw	1 << 6		;Enable DHW blocking
 		andwf	temp,F		;Keep the bits that match the mask
 		xorlw	-1		;Invert the mask
 		andwf	byte3,W		;Drop the bits to be replaced
@@ -3604,7 +3610,7 @@ SerialCmdTable	goto	SerialCmd00	; AA, MM, RR, TT commands
 		goto	$		; WD command
 #endif
 		goto	SerialCmd14	; DP command
-		retlw	CommandNG
+		goto	SerialCmd15	; BW command
 		retlw	CommandNG
 		goto	SerialCmd17	; TC command
 		retlw	CommandNG
@@ -3613,7 +3619,7 @@ SerialCmdTable	goto	SerialCmd00	; AA, MM, RR, TT commands
 		goto	SerialCmd1B	; OT, SH commands
 		goto	SerialCmd1C	; UI command
 		goto	SerialCmd1D	; IT, PM commands
-		retlw	CommandNG
+		goto	SerialCmd1E	; SM command
 		goto	SerialCmd1F	; HW command
 
 SerialOverrun	bcf	Overrun
@@ -3741,6 +3747,12 @@ SerialCmd14	movfw	INDF1
 		goto	SetDebugPtr
 		retlw	CommandNG
 
+SerialCmd15	movfw	INDF1
+		xorlw	'B'
+		skpnz
+		goto 	SetDHWBlock
+		retlw	CommandNG
+
 SerialCmd17	movfw	INDF1
 		xorlw	'T'
 		skpnz
@@ -3775,6 +3787,12 @@ SerialCmd1D	movfw	INDF1
 		xorlw	'I' ^ 'P'
 		skpnz
 		goto	SetPrioMessage
+		retlw	CommandNG
+
+SerialCmd1E	movfw	INDF1
+		xorlw	'S'
+		skpnz
+		goto 	SetSummerMode
 		retlw	CommandNG
 
 SerialCmd1F	movfw	INDF1
@@ -4329,9 +4347,7 @@ SlaveParamCheck	movfw	loopcounter
 		retlw	SyntaxError
 		movwf	TSPValue
 		bsf	PrioMsgWrite
-
 SlaveParamRead	bsf	PriorityMsg	;Request the TSP
-
 		movfw	prioritymsgid	;Confirm the command
 		lcall	PrintByte
 		movlw	':'
@@ -4344,6 +4360,22 @@ SlaveParamRead	bsf	PriorityMsg	;Request the TSP
 		call	PrintChar
 		movfw	TSPValue
 		goto	PrintByte
+
+SetSummerMode	call	CheckBoolean
+		skpc
+		return
+		bcf	SummerMode
+		skpz
+		bsf	SummerMode
+		goto	SetModeDone	;Store in EEPROM and transmit ACK
+
+SetDHWBlock	call	CheckBoolean
+		skpc
+		return
+		bcf	DHWBlocking
+		skpz
+		bsf	DHWBlocking
+		goto	GoPrintDigit
 
 SaveConfig	movfw	conf
 		movwf	temp
