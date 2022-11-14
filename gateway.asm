@@ -5,7 +5,7 @@
 
 #define		version		"6.2"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"3"	;Comment out when not applicable
+#define 	patch		"4"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -3859,20 +3859,20 @@ SerialCmdGPIO	movfw	INDF1
 		sublw	'G'
 		skpz
 		retlw	CommandNG	;GPIO commands must start with 'G'
-		movfw	rxpointer
-		sublw	4
+		call	GetDecimalArg	;Get the GPIO function
+		skpnc			;Valid number?
+		return			;Report error
+		tstf	INDF1		;Check for end of command
 		skpz
-		retlw	SyntaxError	;Command length must be 4
-		moviw	3[FSR1]
-		addlw	-'0'
+		retlw	SyntaxError
 		movwf	temp		;Keep func code for storing in EEPROM
-		andlw	b'11111000'	;Currently there are 7 GPIO functions
-		skpz
-		retlw	SyntaxError	;Invalid GPIO function
-		moviw	1[FSR1]
-		lsrf	WREG,W		;Shift bit 0 int the carry
+		sublw	8		;Currently there are 8 GPIO functions
+		skpc
+		retlw	BadValue	;Invalid GPIO function
+		movlw	rxbuffer + 1
+		movwf	FSR1L		;Point to the GPIO port letter
 		movlw	b'11110000'	;Mask to clear old GPIO A function
-		skpnc			;Configuring GPIO B?
+		btfsc   INDF1,0		;Configuring GPIO B?
 		goto	SetGPIOFunction
 		andwf	GPIOFunction,W	;GPIO B function code in high nibble
 		xorlw	0x70		;Old GPIO B function was DS1820?
@@ -3885,18 +3885,20 @@ SetGPIOFunction	andwf	GPIOFunction,W	;Clear the old function code
 		movwf	GPIOFunction	;Store in RAM
 		movwf	temp		;Value to write to EEPROM
 		movlw	FunctionGPIO	;EEPROM address to write to
-		call	WriteEpromData	;Save in EEPROM, does not affect carry
+		call	WriteEpromData	;Save in EEPROM
 		bsf	gpio_port1
 		bcf	gpio_port2
 		movlw	b'11000000'
-		skpc			;Configuring GPIO A?
+		btfss	INDF1,0		;Configuring GPIO A?
 		xorwf	gpio_mask,F
-		lcall	gpio_initport	;Does not affect carry
+		lcall	gpio_initport
+		skpnc
+		return
 		movfw	GPIOFunction
-		skpc			;Configuring GPIO A?
+		btfss	INDF1,0		;Configuring GPIO A?
 		swapf	GPIOFunction,W
-		andlw	b'111'
-GoPrintDigit	lgoto	PrintDigit
+		andlw	b'1111'
+GoPrintDigit	lgoto	PrintByte
 
 CheckBoolean	clrc			;Carry indicates success
 		movfw	rxpointer
@@ -5067,16 +5069,18 @@ RemoteRequest	call	GetDecimalArg
 		constant GPIO_HOME=5
 		constant GPIO_AWAY=6
 		constant GPIO_DS1820=7
+		constant GPIO_DHWBLK=8
 
 gpio_init	bsf	gpio_port1	;Set up the port mask for gpio port 1
 		bcf	gpio_port2
 		call	gpio_initport	;Initialize the port funtion
 		bcf	gpio_port1	;Set up the port mask for gpio port 2
 		bsf	gpio_port2
-gpio_initport	movfw	GPIOFunction
+gpio_initport	clrc
+		movfw	GPIOFunction
 		btfsc	gpio_port2
 		swapf	GPIOFunction,W
-		andlw	b'111'		;Limit to 0-7
+		andlw	b'1111'		;Use only the low nibble
 		brw			;Jump into the jump table
 gpio_inittab	goto	gpio_input	;GPIO_NONE
 		goto	gpio_initgnd	;GPIO_GND
@@ -5086,6 +5090,22 @@ gpio_inittab	goto	gpio_input	;GPIO_NONE
 		goto	gpio_input	;GPIO_HOME
 		goto	gpio_input	;GPIO_AWAY
 		goto	gpio_onewire	;GPIO_DS1820
+		goto	gpio_input	;GPIO_DHWBLK
+		bra	gpio_invalid	;9
+		bra	gpio_invalid	;10
+		bra	gpio_invalid	;11
+		bra	gpio_invalid	;12
+		bra	gpio_invalid	;13
+		bra	gpio_invalid	;14
+gpio_invalid	movlw	b'11110000'
+		btfsc	gpio_port1
+		andwf	GPIOFunction,F
+		movlw	b'00001111'
+		btfsc	gpio_port2
+		andwf	GPIOFunction,F
+		setc
+		retlw	BadValue
+
 gpio_onewire	movlw	b'11110000'
 		btfss	gpio_port2	;Function is only supported on port 2
 		andwf	GPIOFunction,F	;Disable function on port 1
@@ -5117,7 +5137,7 @@ gpio_common	bsf	gpio_port1	;Set up the port mask for gpio port 1
 gpio_apply	movfw	GPIOFunction
 		btfsc	gpio_port2
 		swapf	GPIOFunction,W
-		andlw	b'111'		;Limit to 0-7
+		andlw	b'1111'		;Limit to 0-15
 		brw			;Jump into the jump table
 gpio_table	return			;GPIO_NONE
 		return			;GPIO_GND
@@ -5127,6 +5147,8 @@ gpio_table	return			;GPIO_NONE
 		goto	gpio_home	;GPIO_HOME
 		goto	gpio_away	;GPIO_AWAY
 		goto	gpio_temp	;GPIO_DS1820
+		goto	gpio_block	;GPIO_DHWBLK
+		
 gpio_lede	movfw	PORTA		;Get current state of the GPIO pin
 		btfsc	VirtualLedE	;Check the shadow LED state
 		comf	PORTA,W		;Get inverted state of the GPIO pin
@@ -5172,6 +5194,15 @@ gpio_armed	btfsc	gpioaway	;Did the port change since last check?
 		movwf	float2		;Configure the remote setpoint
 		movlw	b'01'		;Temperature override mode: Continue
 gpio_setpoint	pcall	SetSetPoint	;Set setpoint
+		return
+gpio_block	comf	PORTA,W		;Get the inverted state of PORT A
+		andwf	gpio_mask,W	;Apply the GPIO port mask
+		andlw	b'11000000'	;Clear the irrelevant bits
+		skpz			;Do not block DHW?
+		movlw	-1		;Block DHW
+		xorwf	statusflags,W	;Compare with the current state
+		andlw	b'01000000'	;Mask off the DHWBlocking bit
+		xorwf	statusflags,F	;Update the current state
 		return
 
 ;########################################################################
