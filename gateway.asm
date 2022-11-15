@@ -5,7 +5,7 @@
 
 #define		version		"6.2"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"4"	;Comment out when not applicable
+#define 	patch		"5"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -2880,7 +2880,7 @@ MsgId14Change	bsf	MsgWriteOp	;MaxRelMod must be a WriteData request
 MessageID16	btfsc	MsgResponse
 		;We don't want an überclever thermostat to stop sending these
 		;messages, so make sure we always return an acknowledgement
-		goto	messageack	;Turn request into acknowledgement
+		goto	missingdata	;Turn request into acknowledgement
 		btfsc	OverrideReq	;Check for pending override request
 		btfsc	OverrideWait	;Must actually send the request first
 		return
