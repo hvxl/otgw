@@ -5,7 +5,7 @@
 
 #define		version		"6.3"
 #define		phase		"."	;a=alpha, b=beta, .=production
-;#define 	patch		"5"	;Comment out when not applicable
+#define 	patch		"1"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -2642,7 +2642,11 @@ readstatus	call	MandatoryID	;Remove any blacklisting for the DataID
 		xorlw	-1		;Invert the mask
 		andwf	byte3,W		;Drop the bits to be replaced
 		iorwf	temp,W		;Fill in the modified bits
-		goto	setbyte3
+		call	setbyte3
+		movfw	byte3
+		andlw	b'00000010'	;Check the DHW enable bit
+		movlw	'C'
+		goto	SwitchLED	;Update the comfort mode LED
 
 statusreturn	btfsc	byte1,5
 		return			;Not a valid response from the boiler
@@ -2672,11 +2676,7 @@ statusmaint	movlw	'M'
 		movfw	byte4
 		andlw	b'00000010'	;Check the CH mode bit
 		movlw	'H'
-		call	SwitchLED	;Update the central heating LED
-		movfw	byte3
-		andlw	b'00000010'	;Check the DHW enable bit
-		movlw	'C'
-		goto	SwitchLED	;Update the comfort mode LED
+		goto	SwitchLED	;Update the central heating LED
 
 dhwpushcheck	btfsc	dhwpushstarted
 		bra	dhwpushstage2
@@ -3853,7 +3853,8 @@ SetLEDLoop	andwf	INDF0,F		;Remove the LED from the function flags
 		movfw	float1		;Name of the new function, clears Z-bit
 		btfss	INDF0,0		;Check the function state
 		setz			;Function state is off
-		lgoto	SwitchLED	;Set the initial state of the LED
+		lcall	SwitchLED	;Set the initial state of the LED
+		retlw	0
 
 SerialCmdGPIO	movfw	INDF1
 		sublw	'G'
