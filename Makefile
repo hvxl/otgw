@@ -16,7 +16,7 @@ TCLSH = tclsh
 $(OUTPUT) $(COD): $(OTGWOBJECTS) $(SCRIPT)
 	$(GPLINK) --map -s $(SCRIPT) -o $@ $(OTGWOBJECTS)
 
-diagnose.hex: $(DIAGOBJECTS) $(SCRIPT)
+diagnose.hex diagnose.cod: $(DIAGOBJECTS) $(SCRIPT)
 	$(GPLINK) --map -s $(SCRIPT) -o $@ $(DIAGOBJECTS)
 
 interface.hex: $(INTFOBJECTS) $(SCRIPT)

@@ -13,7 +13,7 @@
 ;5) Measure and report voltages detected on the Opentherm interfaces
 ;6) Measure periods of no activity on the opentherm lines.
 ;
-#define		version		"2.0"
+#define		version		"2.1"
 
 		__config	H'8007', B'00101111111100'
 		__config	H'8008', B'01101011111111'
@@ -23,6 +23,7 @@
 #include "p16f1847.inc"
 
 #define		RXD	PORTB,2
+#define		TSTAT	PORTB,3
 
 #define		EOS	26	;^Z
 #define		ANALOG0	0 << 2
@@ -31,9 +32,34 @@
 #define		DACVREF	30 << 2
 #define		FVRBUF1	31 << 2
 
-		UDATA_SHR
+		constant V_SHORT=6	;0.8V * 4.7 / 37.7 * 128 / 2.048
+		constant V_LOW=86	;11V * 4.7 / 37.7 * 128 / 2.048
+		constant V_OPEN=156	;20V * 4.7 / 37.7 * 128 / 2.048
 
-Bank0data	UDATA
+;Comparator configuration
+		;Bit 7 CxON = 1 - Comparator enabled
+		;Bit 6 CxOUT = R/O
+		;Bit 5 CxOE = 0 - CxOUT internal only / 1 - output on CxOUT pin
+		;Bit 4 CxPOL = 0 - Not inverted
+		;Bit 3 Unimplemented
+		;Bit 2 CxSP = 1 - Normal power
+		;Bit 1 CxHYS = 1 - Hysteresis enabled
+		;Bit 0 CxSYNC = 0 - Asynchronous output
+		constant MONITORMODE=b'10100110'
+		constant GATEWAYMODE=b'10000110'
+
+		udata_shr
+byte1		res	1
+byte2		res	1
+byte3		res	1
+byte4		res	1
+
+tstatflags	res	1
+#define		NoThermostat	tstatflags,0
+#define		OneSecond	tstatflags,1
+#define		NextBit		tstatflags,3	;Must match SlaveOut
+
+Bank0data	udata
 testnum		res	1
 flags		res	1	;Flags to be used by different tests
 
@@ -60,25 +86,38 @@ accuau		res	1
 accubl		res	1
 accubh		res	1
 accubu		res	1
-supplyl		res	1		;Power supply voltage
+supplyl		res	1	;Power supply voltage
 supplyh		res	1
 
-Bank1data	UDATA
+seccount	res	1
 
-Bank2data	UDATA
+quarter		res	1
+
+Bank1data	udata
+LineVoltage	res	1	;The measured voltage on the thermostat input
+VoltShort	res	1	;Threshold for shorted line
+VoltLow		res	1	;Threshold for low logical level
+VoltOpen	res	1	;Threshold for open line
+
+Bank2data	udata
 input		res	80
 
-Bank6data	UDATA
+Bank3data	udata
+levels		res	0
+levels1		res	16
+levels2		res	16
+
+Bank6data	udata
 ccpsavel	res	1
 ccpsaveh	res	1
 
 ;Variables used by test 1
-testdata	UDATA_OVR
+testdata	udata_ovr
 ledcounter	res	1
 leds		res	1
 
 ;Variables used by test 2 & 3
-testdata	UDATA_OVR
+testdata	udata_ovr
 compsave	res	1
 compmask	res	1
 bufferhead	res	1
@@ -90,13 +129,20 @@ buffertail	res	1
 #define		decimaldot	flags,4
 
 ;Variables used by test 5
-testdata	UDATA_OVR
+testdata	udata_ovr
 prevvalue	res	1
 loopcounter2	res	1
-levels		res	16
+default		res	1
+reflevel	res	1
+lowerindex	res	1
+upperindex	res	1
+lowersave	res	1
+uppersave	res	1
+gaph		res	1
+gapl		res	1
 
 ;Variables used by test 6
-testdata	UDATA_OVR
+testdata	udata_ovr
 idleflags	res	1
 millisecs1	res	1
 millisecs2	res	1
@@ -111,14 +157,8 @@ txbuffer	res	0		;Serial transmit buffer (256 bytes)
 linear1		udata	0x2300		;48 bytes into bank 9
 buffer		res	0		;Space for 120 transitions, 2 bytes each
 
-Print		macro	String
-		banksel	EEADRH
-		movlw	high String
-		movwf	EEADRH
-		movlw	low String
-		movwf	EEADRL
-		call	PrintString
-		endm
+#define		SlaveOut	PORTA,3
+#define		SlaveMask	b'00001000'
 
 		extern	SelfProg
 		global	Voltages, BitLenMaster
@@ -130,15 +170,25 @@ ResetVector	code	0x0000
 		goto	Start		;Start the opentherm measure program
 
 InterruptVector	code	0x0004
+		pagesel	MasterInt
 		banksel	testnum		;Bank 0
 		movfw	testnum
 		brw
 		retfie
 		retfie
-		bra	MasterInt	;Measure pulses on the Master interface
-		bra	SlaveInt	;Measure pulses on the Slave interface
+		bra	test2interrupt	;Measure pulses on the Master interface
+		bra	test3interrupt	;Measure pulses on the Slave interface
 		retfie
+		bra	test5interrupt	;Measure voltage levels
 		retfie
+
+test2interrupt	btfsc	PIR3,CCP3IF
+		call	MasterInt
+		retfie
+test3interrupt	btfsc	PIR3,CCP4IF
+		call	SlaveInt
+test5interrupt	btfsc	PIR1,TMR2IF
+		call	timer2int
 		retfie
 
 MasterInt	clrf	TMR0
@@ -155,7 +205,7 @@ MasterInt	clrf	TMR0
 		movwi	FSR0++
 		movfw	CCPR3H
 		movwi	FSR0++
-		retfie
+		return
 
 SlaveInt	clrf	TMR0
 		bcf	PIR3,CCP4IF
@@ -171,7 +221,34 @@ SlaveInt	clrf	TMR0
 		movwi	FSR0++
 		movfw	CCPR4H
 		movwi	FSR0++
-		retfie
+		return
+
+timer2int	bcf	PIR1,TMR2IF	;Clear the interrupt flag
+		tstf	quarter
+		skpnz			;Message in progress?
+		return
+		decf	quarter,F	;Update the 1/4 ms counter
+		skpnz
+		bcf	T2CON,TMR2ON	;Stop the timer
+		btfsc	quarter,0
+		return			;Nothing to do in a stable interval
+		movfw	tstatflags	;Get the desired output level
+		xorwf	PORTA,W		;Compare against the current port level
+		andlw	SlaveMask	;Only apply for the relevant output
+		xorwf	PORTA,F		;Update the output port
+		movlw	SlaveMask
+		xorwf	tstatflags,F	;Invert the level for next time
+		btfsc	quarter,1
+		return
+		bcf	NextBit		;Start with assumption next bit is 0
+		setc			;Prepare to shift in a stop bit
+		rlf	byte4,F		;Shift the full 32 bit message buffer
+		rlf	byte3,F		;Shift bits 8 through 15
+		rlf	byte2,F		;Shift bits 16 through 23
+		rlf	byte1,F		;Shift bits 24 through 31
+		skpc			;Test the bit shifted out of the buffer
+		bsf	NextBit		;Next time, send a logical 1
+		return
 
 Main		code
 Start
@@ -180,7 +257,7 @@ Start
 		movwf	OSCCON		;Configure the oscillator
 
 		;Configure digital I/O
-		banksel	TRISA
+		banksel	TRISA		;Bank 1
 		movlw	b'11100111'
 		movwf	TRISA
 		movlw	b'00100111'
@@ -202,6 +279,17 @@ Start
 		movlw	23		;2.048 * 23 / 32 = 1.472V
 		movwf	DACCON1		;Set the reference voltage
 
+		;Configure comparators
+		clrf	tstatflags
+		call	SetupCompModule
+
+		;Configure A/D converter
+		banksel	ADCON0		;Bank 1
+		movlw	b'00010000'	;Left justified, Fosc/8, Vss, Vdd
+		movwf	ADCON1
+		movlw	b'01111101'	;A/D on, channel 31 - FVR buffer 1
+		movwf	ADCON0
+
 		;Configure the serial interface
 		banksel	SPBRGL		;Bank 3
 		movlw	25
@@ -212,64 +300,103 @@ Start
 		bsf	RCSTA,SPEN	;Enable serial port
 		bsf	RCSTA,CREN	;Enable receive
 
+		banksel	ADCON0		;Bank 1
+		bsf	ADCON0,GO	;Measure FVR buffer 1
+WaitConvert	btfsc	ADCON0,GO	;Check that A/D conversion is finished
+		bra	WaitConvert	;Wait for A/D conversion to complete
+		movlw	V_SHORT		;Short circuit threshold
+		call	CalcThreshold	;Adjust for measured supply voltage
+		movwf	VoltShort
+		movlw	V_LOW		;Low level threshold
+		call	CalcThreshold	;Adjust for measured supply voltage
+		movwf	VoltLow
+		movlw	V_OPEN		;Open line threshold
+		call	CalcThreshold	;Adjust for measured supply voltage
+		movwf	VoltOpen
+
 		banksel	T1CON		;Bank 0
 		clrf	T1CON
 		clrf	txhead
 		clrf	txtail
 
+#define		MAXTEST	6
+
 MainLoop	bcf	INTCON,GIE	;Disable interrupts
 		;Configure timer 0
 		banksel	OPTION_REG	;Bank 1
-		movlw	b'11010111'	;1:256 prescaler
+		movlw	b'11010101'	;1:64 prescaler
 		movwf	OPTION_REG
+		clrf	PIE1		;Disable all interrupt sources
+		clrf	PIE2
+		clrf	PIE2
+		;Configure AD converter
+		movlw	b'00010000'	;Left justified, Fosc/8, Vss, Vdd
+		movwf	ADCON1
+		movlw	b'00000001'	;A/D on, channel 0 - pin AN0
+		movwf	ADCON0
 		;Configure comparators
-		banksel	CM1CON0		;Bank 2
-		movlw	b'00010000'	;In+ = DAC, In- = RA0, no interrupts
-		movwf	CM1CON1
-		movlw	b'00010001'	;In+ = DAC, In- = RA1, no interrupts
-		movwf	CM2CON1
-		movlw	b'10100110'	;Enabled, not inverted, output on CxOUT
-		movwf	CM1CON0		;Configure comparator 1
-		movwf	CM2CON0		;Configure comparator 2
+		call	SetupCompModule	;Bank 0
+		;Stop timers (TMR0 can't be stopped)
+		clrf	T1CON
+		clrf	T2CON
 
-		banksel	PIE2		;Bank 1
-		bsf	PIE2,C1IE
-		bsf	PIE2,C2IE
+		btfsc	NoThermostat
+		bcf	TSTAT		;Indicate absence of thermostat
+
+		clrf	seccount
+		bcf	SlaveOut	;Prevent low-voltage heat demand
+
 		;Display the menu
-		Print	Banner
-		Print	Prompt
-		movlw	high input
+		movlw	Banner
+		call	Print
+		movlw	Prompt
+		call	Print
+		banksel	RCSTA		;Bank 3
+		btfsc	RCSTA,OERR
+		call	ClearOverrunErr
+		movlb	0		;Bank 0
+		call	GetString
+		skpnc
+		bra	BadTest
+		movwf	testnum
+		sublw	MAXTEST
+		sublw	MAXTEST
+		skpc
+		goto	BadTest
+		call	RunTest
+		goto	MainLoop
+
+BadTest		btfsc	RCSTA,FERR
+		goto	Break
+		movlw	InvalidTestStr
+		call	Print
+		goto	MainLoop
+
+		;Clear overrun error
+ClearOverrunErr	movfw	RCREG
+		bcf	RCSTA,CREN
+		bsf	RCSTA,CREN
+		return
+
+GetString	movlw	high input
 		movwf	FSR0H
 		movlw	low input
 		movwf	FSR0L
-		banksel	RCSTA		;Bank 3
-		btfss	RCSTA,OERR
-		bra	MainSkip
-		;Clear overrun error
-		movfw	RCREG
-		bcf	RCSTA,CREN
-		bsf	RCSTA,CREN
-MainSkip
-		banksel	PIR1
-		clrf	testnum
-		;Wait for input
-MainLoop1	clrwdt
+GetStringLoop	clrwdt
 		call	IdleTasks	;Perform standard tasks
-		call	Receiver	;Check for serial commands
-		tstf	testnum
-		skpnz
-		goto	MainLoop1
-		goto	MainLoop
-
-Receiver	btfss	PIR1,RCIF
-		return
+		btfsc	PIR1,ADIF
+		call	CheckThermostat
+		btfsc	INTCON,TMR0IF
+		call	IdleTimer
+		btfss	PIR1,RCIF
+		bra	GetStringLoop
 		banksel	RCSTA		;Bank 3
 		btfss	RCSTA,FERR
 		bra	ReceivedChar
 		movfw	RCREG
-		banksel	PORTA		;Bank 0
+		movlb	0		;Bank 0
 		skpz			;A BREAK condition occurred?
-		return			;Discard bad character
+		bra	GetStringLoop	;Discard bad character
 Break		clrwdt
 		btfss	RXD		;Check the serial receive line
 		bra	Break		;Wait for the BREAK condition to end
@@ -277,107 +404,185 @@ Break		clrwdt
 
 ReceivedChar	movfw	RCREG		;Get the received character
 		movwf	INDF0
-		banksel	0		;Bank 0
+		movlb	0		;Bank 0
 		andlw	~b'11111'
 		skpnz
 		bra	ControlChar
-ControlDone	movlw	input +	79
+		movlw	input +	79
 		subwf	FSR0L,W
 		skpnc
-		return
+		bra	GetStringLoop
 		moviw	FSR0++
 		call	PrintChar
-		return
+		bra	GetStringLoop
 ControlChar	movfw	INDF0
-		brw
-ControlTable	return
-		return
-		return
-		return
-		return
-		return
-		return
-		return
-		bra	BackSpace	;Backspace
-		return			;Tab
-		return			;Newline
-		return
-		return
-		bra	Enter		;Carriage return
-		return
-		return
-		return
-		return
-		return
-		return
-		return
-		return			;Ctrl-U
-		return
-		return
-		return
-		return
-		return
-		return
-		return
-		return
-		return
+		xorlw	13		;Enter
+		skpnz
+		bra	Enter
+		xorlw	13 ^ 8		;Backspace
+		skpnz
+		bra	BackSpace
+		goto	GetStringLoop
 
 BackSpace	movlw	low input
 		subwf	FSR0L,W
 		skpnz
-		return
+		bra	GetStringLoop
 		decf	FSR0L,F
 		movlw	'\b'
 		call	PrintChar
 		call	PrintChar
 		movlw	'\b'
 		call	PrintChar
-		return
+		bra	GetStringLoop
 
 Enter		call	PrintNewline
 		clrf	INDF0
 		movlw	low input
 		movwf	FSR0L
-TestNumLoop	tstf	INDF0
+		clrf	temp
+		setc
+NumberLoop	movfw	temp
+		tstf	INDF0
 		skpnz
-		goto	RunTest
-		movlw	26
-		subwf	testnum,W
+		return
+		addlw	-26
 		skpnc
-		bra	BadTest
+		bra	OutOfRange
 		; Multiply testnumber by 10
-		movfw	testnum		;1 x testnum
-		addwf	testnum,F	;2 x testnum
-		rlf	testnum,F	;4 x testnum
-		addwf	testnum,F	;5 x testnum
-		rlf	testnum,F	;10 x testnum
+		movfw	temp		;1 x testnum
+		addwf	temp,F		;2 x testnum
+		rlf	temp,F		;4 x testnum
+		addwf	temp,F		;5 x testnum
+		rlf	temp,F		;10 x testnum
 		; --
 		moviw	FSR0++
 		sublw	'9'
 		sublw	'9' - '0'
 		skpc
-		bra	BadTest
-		addwf	testnum,F
+		bra	BadNumber
+		addwf	temp,F
 		skpc
-		goto	TestNumLoop
-BadTest		Print	InvalidTestStr
-		comf	testnum,F
-		return
+		bra	NumberLoop
+OutOfRange	clrz			;Entry invalid
+		retlw	1		;Number out of range
+BadNumber	setc			;No valid number entered
+		retlw	2		;Not a number
 
 IdleTasks	btfsc	printpending	;No characters waiting?
 		btfss	PIR1,TXIF	;Transmit register empty?
 		return
 		goto	PrintFlush
 
-#define	MAXTEST	6
-RunTest		movfw	testnum
-		sublw	MAXTEST
-		sublw	MAXTEST
+IdleTimer	bcf	INTCON,TMR0IF	;Clear the interrupt flag
+		banksel	ADCON0		;Bank 1
+		bsf	ADCON0,GO	;Start A/D conversion
+		movlb	0
+		return
+
+CalcThreshold	movwf	byte1		;Store the multiplication factor
+		movlw	8
+		movwf	loopcounter	;Doing 8-bit multiplication
+		movfw	ADRESH		;Get the A/D conversion result
+		btfsc	ADRESL,7
+		addlw	1		;Round the value up
+;Multiplication from http://www.piclist.com/Techref/microchip/math/mul/8x8.htm
+		clrf	byte2		;High byte of the product
+		rrf	byte1,F
+CalcThresholdL1	skpnc
+		addwf	byte2,F
+		rrf	byte2,F
+		rrf	byte1,F
+		decfsz	loopcounter,F
+		bra	CalcThresholdL1
+;--
+		lslf	byte1,W		;Shift the result one bit to the left
+		rlf	byte2,W		;So the high byte is the final result
+		btfsc	byte1,6
+		addlw	1		;Round up
+		return
+
+CheckThermostat	bcf	PIR1,ADIF
+		banksel	ADRESH		;Bank 1
+		movfw	ADRESH		;Get the A/D result
+		xorwf	LineVoltage,W	;Swap values of W and LineVoltage
+		xorwf	LineVoltage,F
+		xorwf	LineVoltage,W	;--
+		subwf	LineVoltage,W	;Calculate the difference
 		skpc
-		goto	BadTest
-		brw
+		sublw	0		;Turn into absolute value
+		andlw	b'11111100'	;Check for limited deviation
+		skpz
+		bra	TCheckReturn	;Unstable line voltage
+		movfw	LineVoltage	;Get the A/D result again
+		subwf	VoltOpen,W	;Line open?
+		skpc
+		bra	OpenCircuit	;No opentherm thermostat connected
+		movfw	LineVoltage	;Get the A/D result again
+		subwf	VoltLow,W	;Check logical level
+		skpnc			;Low level?
+		btfss	NoThermostat
+		bra	TCheckReturn
+		bcf	NoThermostat	;Thermostat was reconnected
+		bra	SetupCompModule
+OpenCircuit	btfsc	NoThermostat
+		bra	TCheckReturn
+		bsf	NoThermostat	;Thermostat has been disconnected
+SetupCompModule	banksel	CM1CON0		;Bank 2
+		;Bit 7 CxINTP = 0 - No interrupt on positive edge
+		;Bit 6 CxINTN = 0 - No interrupt on negative edge
+		;Bit 5-4 = 1 - CxVP connects to DAC voltage reference
+		;Bit 3-2 Unimplemented
+		;Bit 1-0 = 0 - C12IN0- (RA0) / 1 - C12IN1- (RA1)
+		movlw	b'00010000'
+		movwf	CM1CON1
+		movlw	b'00010001'
+		movwf	CM2CON1
+		movlw	MONITORMODE	;Comparator setting for monitor mode
+		movwf	CM2CON0		;Configure comparator 2
+		btfsc	NoThermostat	;Thermostat connected?
+		movlw	GATEWAYMODE	;Comparator setting for gateway mode
+		movwf	CM1CON0		;Configure comparator 1
+TCheckReturn
+		movlb	0		;Bank 0
+		return
+
+MsgGenerator	bsf	SlaveOut	;Make opentherm line low
+		movlw	249		;Timer overflows every 250 microseconds
+		movwf	PR2		;Set up period register
+		banksel	PIE1		;Bank 1
+		bsf	PIE1,TMR2IE	;Enable timer 2 interrupts
+		banksel	PIR1		;Bank 0
+		bcf	PIR1,TMR2IF	;Forget any old overflows
+		movlw	2		;Between 131 and 196 milliseconds of
+		movwf	seccount	; idle time before the first message
+		return
+
+MsgHandler	btfsc	NoThermostat
+		btfss	INTCON,TMR0IF
+		return
+		bcf	INTCON,TMR0IF
+		tstf	seccount
+		skpz
+		decfsz	seccount,F
+		return
+		movlw	15
+		movwf	seccount
+		;T80190000
+		movlw	0x80		;Read-Data and parity bit
+		movwf	byte1
+		movlw	0x19		;MsgID 25: Boiler water temperature
+		movwf	byte2
+		clrf	byte3
+		clrf	byte4
+		movlw	34 * 4		;Number of quarter bits
+		movwf	quarter
+		bsf	T2CON,TMR2ON	;Start timer 2
+		return
+
+RunTest		brw
 ; Test 0: Reset the gateway to allow starting a firmware update
-		goto	ResetGateway
+		reset
 ; Test 1: LED test. Light up the LEDS one by one until a CR is received on the
 ; serial interface.
 		goto	LEDTest
@@ -396,18 +601,12 @@ RunTest		movfw	testnum
 ; Test 6: Idle periods
 		goto	IdlePeriods
 
-ResetGateway	movlw	input
-		subwf	FSR0L,W
-		skpnz
-		return
-		reset
-
 ;Test 1:
 LEDTest		clrf	leds
 		movlw	1
 		movwf	ledcounter
 		banksel	OPTION_REG	;Bank 1
-		movlw	b'11010111'
+		movlw	b'11010111'	;1:256 prescaler
 		movwf	OPTION_REG	;Make timer 0 run as slow as possible
 		banksel	ledcounter	;Bank 0
 TestLoop1	clrwdt
@@ -459,11 +658,16 @@ BitLenSlave	call	BitLenInit
 		movwf	CCP4CON		;Capture mode: every falling edge
 		banksel	PIR3		;Bank 0
 		bcf	PIR3,CCP4IF
+		btfsc	NoThermostat	;Thermostat connected?
+		call	MsgGenerator	;Generate messages to the boiler
 		banksel	PIE3		;Bank 1
 		bsf	PIE3,CCP4IE
 
 BitLengths	movlw	high buffer
 		movwf	FSR0H
+		banksel	OPTION_REG	;Bank 1
+		movlw	b'11010111'	;1:256 prescaler
+		movwf	OPTION_REG	;Make timer 0 run as slow as possible
 		banksel	bufferhead	;Bank 0
 		bsf	INTCON,PEIE	;Enable peripheral interrupts
 		bsf	INTCON,GIE	;Enable all interrupts
@@ -472,6 +676,7 @@ BitLenStart	clrf	bufferhead
 		clrf	FSR0L
 BitLenLoop	clrwdt
 		call	IdleTasks
+		call	MsgHandler
 		call	CheckReturn
 		skpnz
 		bra	BitLenCleanUp
@@ -554,22 +759,27 @@ LoopDelayWait	clrwdt
 		banksel	0		;Bank 0
 		skpz
 		bra	LoopDelayWait	;Repeat
-		Print	Symmetry0Str
+		movlw	Symmetry0Str
+		call	Print
 		movlw	b'00000010'	;Gate is active low, Comparator 1
 		call	Check		;Test OK1A high to low transition
-		Print	Symmetry1Str
+		movlw	Symmetry1Str
+		call	Print
 		movlw	b'01000010'	;Gate is active high, Comparator 1
 		call	Check		;Test OK1A low to high transition
-		Print	Symmetry2Str
+		movlw	Symmetry2Str
+		call	Print
 		movlw	b'00000011'	;Gate is active low, Comparator 2
 		call	Check		;Test OK1B high to low transition
-		Print	Symmetry3Str
+		movlw	Symmetry3Str
+		call	Print
 		movlw	b'01000011'	;Gate is active high, Comparator 2
 		call	Check		;Test OK1B low to hight transition
 LoopCleanUp	clrf	T1CON
 		clrf	T1GCON
 		return
-NoLoop		Print	NoLoopError
+NoLoop		movlw	NoLoopError
+		call	Print
 		bra	LoopCleanUp
 
 Check		clrf	T1CON
@@ -611,17 +821,23 @@ DelayLoop	clrwdt
 		btfsc	TMR1L,0
 		movlw	'5'
 		call	PrintChar
-		Print	MicroSecStr
+		movlw	MicroSecStr
+		call	Print
 		return
 
 NoResponse	bcf	T1CON,TMR1ON
-BadResponse	Print	DelayLoopError
+BadResponse	movlw	DelayLoopError
+		call	Print
 		return
 
 ; Test 5
 ;Measure FVR1 with NREF = Vss & PREF = Vdd to determine Vdd.
 ;Vdd = FVR2 * 4095 / ADRES
-Voltages
+Voltages	btfsc	NoThermostat	;Thermostat connected?
+		call	MsgGenerator	;Generate messages to the boiler
+		;Enable interrupts
+		bsf	INTCON,PEIE
+		bsf	INTCON,GIE
 		banksel	ADCON0		;Bank 1
 		movlw	b'10010000'	;Right justified, Fosc/8
 		movwf	ADCON1		;Configure the AD converter
@@ -634,7 +850,8 @@ Voltages
 		clrf	valuel
 		call	AnalogValue	;Get measurement in accu B
 		call	divide		;Calculate value / accub
-		Print	PowerStr
+		movlw	PowerStr
+		call	Print
 		;Save the measured supply voltage for future calculations
 		movfw	accual
 		movwf	supplyl
@@ -646,30 +863,52 @@ Voltages
 
 		movlw	DACVREF
 		call	SelectADChannel
-		Print	Analog2Str
+		movlw	Analog2Str
+		call	Print
 		call	AnalogValue
 ;Calculate Supply * AccuB / 1024
-		movfw	supplyl
-		movwf	accual
-		movfw	supplyh
-		movwf	accuah
-		call	multiply	;AccuA * AccuB => Value
-		movlw	high 1024
-		movwf	accubh
-		clrf	accubl
-		call	divide		;Value / AccuB => AccuA
+		call	multiplysupply	;Supply * AccuB => Value
+		call	divideby1024	;Value / 1024 => AccuA
 		call	PrintDotted
 		call	PrintNewline
 
-		Print	Analog0Str
+		movlw	Analog0Str
+		call	Print
 		movlw	ANALOG0
 		call	SelectADChannel
+		movlw	levels1
 		call	FindLevels	;Find all stable voltage levels
-		Print	Analog1Str
+		movlw	Analog1Str
+		call	Print
 		movlw	ANALOG1
 		call	SelectADChannel
+		movlw	levels2
 		call	FindLevels	;Find all stable voltage levels
-		return
+		movlw	VoltRefStr
+		call	Print
+		call	FindVoltRef
+		movwf	default
+		call	PrintDigit
+		movlw	VoltRefPrompt
+		call	Print
+		call	GetString
+		skpz			;No error
+		bra	BadVoltRef
+		skpnc
+		movfw	default
+		sublw	9		;Check for value 0..9
+		sublw	9
+		skpc
+		bra	BadVoltRef
+SetVoltRef	lslf	WREG,W		;Multiply by 2
+		addlw	13		;Minimum level is 0.832V
+		banksel	DACCON1		;Bank 2
+		movwf	DACCON1
+		movlb	0		;Bank 0
+		goto	MainLoop
+BadVoltRef	movlw	InvalidValue
+		call	Print		
+		goto	MainLoop
 
 SelectADChannel	;Common ADC configuration
 		banksel	ADCON0		;Bank 1
@@ -695,15 +934,16 @@ Conversion	btfsc	ADCON0,GO
 		clrf	accubu
 		return
 
-FindLevels	movlw	16
+FindLevels	movwf	FSR0L
+		movlw	high levels
+		movwf	FSR0H
+		movlw	16
 		movwf	loopcounter
-		movlw	levels
-		clrf	FSR0H
-		movwf	FSR0L
 		movlw	-1
 FindLevelInit	movwi	FSR0++
 		decfsz	loopcounter,F
 		goto	FindLevelInit
+		addfsr	FSR0,-16
 		movlw	64
 		movwf	loopcounter2
 		banksel	ADCON1
@@ -712,6 +952,7 @@ FindLevelInit	movwi	FSR0++
 		call	AnalogValue	;Read analog value
 FindLevelLoop1	clrwdt
 		call	IdleTasks
+		call	MsgHandler
 		movfw	accubh
 		movwf	prevvalue	;Remember value for next round
 		call	AnalogValue	;Read analog value
@@ -727,29 +968,31 @@ FindLevelLoop1	clrwdt
 		goto	FindLevelNext1
 		swapf	accubh,W	;Found a stable value
 		andlw	b'1111'
-		addlw	levels
-		movwf	FSR0L
+		addwf	FSR0L,F
 		swapf	accubh,W
 		andlw	b'11110000'
 		movwf	INDF0
 		swapf	accubl,W
 		iorwf	INDF0,F
-FindLevelNext1	decfsz	loopcounter,F
+		movlw	b'11110000'
+		andwf	FSR0L,F		;Reset FSR to the start of the array
+FindLevelNext1	call	MsgHandler
+		decfsz	loopcounter,F
 		goto	FindLevelLoop1
 		decfsz	loopcounter2,F
 		goto	FindLevelLoop1
 		; Report the levels found
 		movlw	':'
 		movwf	temp
-		movlw	levels
-		movwf	FSR0L
+		movlw	16
+		movwf	loopcounter2
 FindLevelLoop2	btfsc	INDF0,0
 		goto	FindLevelNext2
 		movfw	temp
 		call	PrintChar
 		call	PrintChar
-		movlw	levels
-		subwf	FSR0L,W
+		movfw	FSR0L
+		andlw	b'1111'
 		lsrf	WREG,W
 		movwf	accubh
 		rrf	INDF0,W
@@ -757,25 +1000,141 @@ FindLevelLoop2	btfsc	INDF0,0
 		lsrf	accubh,F
 		rrf	accubl,F
 ;Calculate Supply * AccuB / 1024
-		movfw	supplyl
-		movwf	accual
-		movfw	supplyh
-		movwf	accuah
-		call	multiply	;AccuA * AccuB => Value
-		movlw	high 1024
-		movwf	accubh
-		clrf	accubl
-		call	divide		;Value / AccuB => AccuA
+		call	multiplysupply	;Supply * AccuB => Value
+		call	divideby1024	;Value / 1024 => AccuA
 		call	PrintDotted
 		movlw	','
 		movwf	temp
 FindLevelNext2	incf	FSR0L,F
-		movlw	levels + 16
-		subwf	FSR0L,W
-		skpc
+		decfsz	loopcounter2,F
 		goto	FindLevelLoop2
 		call	PrintNewline
 		return
+
+;Calculate the difference between 2 levels, W and reflevel
+LevelGap	movwf	valueh		;Save high byte
+		addlw	levels
+		movwf	FSR0L
+		movfw	INDF0
+		movwf	valuel		;Save low byte
+		movfw	reflevel
+		addlw	levels
+		movwf	FSR0L
+		movfw	INDF0
+		movfw	INDF0		;Low byte to be subtracted
+		subwf	valuel,F	;Subtract the low byte
+		movfw	reflevel	;High byte to be subtracted
+		subwfb	valueh,F	;Subtract the high byte
+		return
+
+;Calculate the difference between two gaps
+LevelDiff	movfw	gapl
+		subwf	valuel,F
+		movfw	gaph
+		subwfb	valueh,F
+		return
+
+;Find the largest gap
+FindVoltRef	clrf	loopcounter	;Start at slot 0
+FindVoltRefMain	movlw	-1
+		movwf	lowerindex	;No lower index found yet
+		movwf	upperindex	;No upper index found yet
+		movwf	reflevel	;No reference level yet
+		clrf	gaph
+		clrf	gapl
+FindVoltRefLoop	movfw	loopcounter	;Index of the slot to check
+		addlw	levels
+		movwf	FSR0L		;Set up indirect addressing
+		btfsc	INDF0,0		;Empty slot?
+		goto	FindVoltRefNext
+		btfsc	reflevel,7	;Previous levels found?
+		goto	FindVoltRefJump
+		movfw	loopcounter
+		call	LevelGap	;Calculate the gap
+		call	LevelDiff	;Get the difference between the gaps
+		skpc			;New gap is bigger?
+		goto	FindVoltRefSkip
+		movfw	valuel
+		addwf	gapl,F
+		movfw	valueh
+		addwfc	gaph,F
+FindVoltRefJump	movfw	reflevel
+		movwf	lowerindex
+		movfw	loopcounter
+		movwf	upperindex
+FindVoltRefSkip	movfw	loopcounter
+		movwf	reflevel
+FindVoltRefNext	movlw	1
+		addwf	loopcounter,F
+		skpdc			;16 levels done?
+		goto	FindVoltRefLoop
+
+		;Only when supply is 3.3V?
+		incf	lowerindex,W
+		subwf	upperindex,W
+		skpnz
+		bsf	lowerindex,7	;Ignore levels that are close together
+
+		btfsc	loopcounter,5	;Less than 32 levels done?
+		goto	FindVoltRefEnd
+		movfw	lowerindex
+		movwf	lowersave
+		movfw	upperindex
+		movwf	uppersave
+		goto	FindVoltRefMain
+FindVoltRefEnd	btfss	lowerindex,7	;Fewer than 2 levels for the boiler?
+		goto	FindVoltRefJ1
+		btfsc	lowersave,7	;Found 2 levels for the thermostat?
+		retlw	5		;Stick to the default
+		movfw	lowersave	;Use the thermostat levels
+		movwf	lowerindex
+		movfw	uppersave
+		movwf	upperindex
+		goto	FindVoltRefJ2
+FindVoltRefJ1	btfsc	lowersave,7	;Found 2 levels for the thermostat?
+		goto	FindVoltRefJ2	;Use the boiler levels
+		;Find the highest lower index
+		movfw	lowerindex
+		subwf	lowersave,W
+		skpndc
+		addwf	lowerindex,F
+		;Find the lowest upper index
+		movfw	upperindex
+		subwf	uppersave,W
+		skpdc
+		addwf	upperindex,F
+		;Check that the upper index is higher than the lower index
+		movfw	upperindex
+		subwf	lowerindex,W
+		skpnc			;Upper index > lower index?
+		retlw	5		;Upper index <= lower index
+FindVoltRefJ2	;Get the average of the upper and lower index values
+		movfw	lowerindex
+		movwf	accubh
+		bcf	accubh,4
+		addlw	levels
+		movwf	FSR0L
+		movfw	INDF0
+		movwf	accubl
+		movfw	upperindex
+		addlw	levels
+		movwf	FSR0L
+		movfw	INDF0
+		addwf	accubl,F
+		movfw	upperindex
+		andlw	b'1111'
+		addwfc	accubh,F
+		lsrf	accubh,F
+		rrf	accubl,F
+;Calculate the real voltage of the average value
+		call	multiplysupply	;AccuA * AccuB => Value
+		call	divideby1024	;Value / AccuB => AccuA
+		lsrf	accuah,W
+		sublw	15		;Maximum acceptable value
+		sublw	15 - 6		;Range of acceptable values
+		skpnc			;Value out of range?
+		return			;Return the selected value
+		retlw	5		;Return the default value
 
 ; Test 6
 IdlePeriods	movlw	b'00000001'	;On, Fosc/4, 1:1 Prescaler
@@ -906,6 +1265,11 @@ PrintNewline	movlw	'\r'
 		movlw	'\n'
 		goto	PrintChar
 
+Print
+		banksel	EEADRH		;Bank 3
+		movwf	EEADRL
+		movlw	high Strings
+		movwf	EEADRH
 PrintString
 		banksel	EECON1		;Bank 3
 		clrf	EECON1
@@ -918,18 +1282,18 @@ PrintString
 		call	PrintStrChar
 		skpnz
 		bra	PrintStrDone
-		banksel	EEDATL
+		banksel	EEDATL		;Bank 3
 		movfw	EEDATL
 		call	PrintStrChar
 		skpnz
 		bra	PrintStrDone
-		banksel	EEADRL
+		banksel	EEADRL		;Bank 3
 		incf	EEADRL,F
 		skpnz
 		incf	EEADRH,F
 		bra	PrintString
 PrintStrDone
-		banksel	0
+		movlb	0
 		return
 
 PrintStrChar	andlw	b'01111111'
@@ -1091,6 +1455,10 @@ PrintFlush	movlw	high txbuffer
 		movfw	INDF1		;Get the first character in the queue
 		bra	PrintTransmit	;Transmit the character
 
+multiplysupply	movfw	supplyl
+		movwf	accual
+		movfw	supplyh
+		movwf	accuah
 ;Double Precision Multiply ( 16x16 -> 32 )
 multiply	movlw	16
 		movwf	loopcounter
@@ -1112,6 +1480,9 @@ multiplyskip	rrf	valuex,F
 		bra	multiplyloop
 		return
 
+divideby1024	movlw	high 1024
+		movwf	accubh
+		clrf	accubl
 divide		clrf	accuau
 		clrf	accuah
 		clrf	accual
@@ -1152,7 +1523,9 @@ divideskip	lsrf	accubu,F
 		bra	divideloop
 		return
 
-Strings		code
+;Put all strings in a fixed 256 word section to allow simple access
+Strings		equ	0x1e00
+		code	Strings
 Banner		da	"\r\nOpentherm gateway diagnostics - Version ", version
 		da	"\r\n\n\032"
 Prompt		da	"1. LED test\r\n"
@@ -1162,7 +1535,7 @@ Prompt		da	"1. LED test\r\n"
 		da	"5. Voltage levels\r\n"
 		da	"6. Idle times\r\n\n"
 		da	"Enter test number: \032"
-InvalidTestStr	da	"\r\nInvalid test\032"
+InvalidTestStr	da	"Invalid test\032"
 NoLoopError	da	"### Error: Interfaces don't appear to be looped\032"
 DelayLoopError	da	"### Error\r\n\032"
 PowerStr	da	"Power supply: \032"
@@ -1174,5 +1547,8 @@ Symmetry1Str	da	"OK1A low-to-high: \032"
 Symmetry2Str	da	"OK1B high-to-low: \032"
 Symmetry3Str	da	"OK1B low-to-high: \032"
 MicroSecStr	da	"us\r\n\032"
+VoltRefStr	da	"Reference voltage setting (0..9) [\032"
+VoltRefPrompt	da	"]: \032"
+InvalidValue	da	"Invalid value\032"
 
 		end
