@@ -5,7 +5,7 @@
 
 #define		version		"6.3"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"1"	;Comment out when not applicable
+#define 	patch		"2"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -2439,7 +2439,7 @@ RemoteCommand	call	TreatMessage	;Process the received message
 ;on the serial interface.
 
 TreatMessage	btfsc	byte2,7
-		goto	FakeResponse	;Limited support for Vender specific ID
+		goto	WordResponse	;Limited support for Vender specific ID
 		movfw	byte2
 		brw
 messagetable	goto	MessageID0	;Data ID 0
@@ -2465,7 +2465,7 @@ messagetable	goto	MessageID0	;Data ID 0
 		goto	MessageID20	;Data ID 20
 		goto	WordResponse	;Data ID 21
 		goto	WordResponse	;Data ID 22
-		goto	FakeResponse	;Data ID 23
+		goto	WordResponse	;Data ID 23
 		goto	WordResponse	;Data ID 24
 		goto	MandatoryWord	;Data ID 25
 		goto	WordResponse	;Data ID 26
@@ -2478,18 +2478,18 @@ messagetable	goto	MessageID0	;Data ID 0
 		goto	WordResponse	;Data ID 33
 		goto	WordResponse	;Data ID 34
 		goto	WordResponse	;Data ID 35
-		goto	FakeResponse	;Data ID 36
-		goto	FakeResponse	;Data ID 37
-		goto	FakeResponse	;Data ID 38
-		goto	FakeResponse	;Data ID 39
-		goto	FakeResponse	;Data ID 40
-		goto	FakeResponse	;Data ID 41
-		goto	FakeResponse	;Data ID 42
-		goto	FakeResponse	;Data ID 43
-		goto	FakeResponse	;Data ID 44
-		goto	FakeResponse	;Data ID 45
-		goto	FakeResponse	;Data ID 46
-		goto	FakeResponse	;Data ID 47
+		goto	WordResponse	;Data ID 36
+		goto	WordResponse	;Data ID 37
+		goto	WordResponse	;Data ID 38
+		goto	WordResponse	;Data ID 39
+		goto	WordResponse	;Data ID 40
+		goto	WordResponse	;Data ID 41
+		goto	WordResponse	;Data ID 42
+		goto	WordResponse	;Data ID 43
+		goto	WordResponse	;Data ID 44
+		goto	WordResponse	;Data ID 45
+		goto	WordResponse	;Data ID 46
+		goto	WordResponse	;Data ID 47
 		goto	MessageID48	;Data ID 48
 		goto	MessageID49	;Data ID 49
 		goto	WordResponse	;Data ID 50
@@ -2506,12 +2506,12 @@ messagetable	goto	MessageID0	;Data ID 0
 		goto	WordResponse	;Data ID 61
 		goto	WordResponse	;Data ID 62
 		goto	WordResponse	;Data ID 63
-		goto	FakeResponse	;Data ID 64
-		goto	FakeResponse	;Data ID 65
-		goto	FakeResponse	;Data ID 66
-		goto	FakeResponse	;Data ID 67
-		goto	FakeResponse	;Data ID 68
-		goto	FakeResponse	;Data ID 69
+		goto	WordResponse	;Data ID 64
+		goto	WordResponse	;Data ID 65
+		goto	WordResponse	;Data ID 66
+		goto	WordResponse	;Data ID 67
+		goto	WordResponse	;Data ID 68
+		goto	WordResponse	;Data ID 69
 		goto	ByteResponse	;Data ID 70
 		goto	MessageID71	;Data ID 71
 		goto	WordResponse	;Data ID 72
@@ -2534,13 +2534,13 @@ messagetable	goto	MessageID0	;Data ID 0
 		goto	TSPReadWrite	;Data ID 89
 		goto	TSPBufferSize	;Data ID 90
 		goto	TSPReadEntry	;Data ID 91
-		goto	FakeResponse	;Data ID 92
-		goto	FakeResponse	;Data ID 93
-		goto	FakeResponse	;Data ID 94
-		goto	FakeResponse	;Data ID 95
-		goto	FakeResponse	;Data ID 96
-		goto	FakeResponse	;Data ID 97
-		goto	FakeResponse	;Data ID 98
+		goto	WordResponse	;Data ID 92
+		goto	WordResponse	;Data ID 93
+		goto	WordResponse	;Data ID 94
+		goto	WordResponse	;Data ID 95
+		goto	WordResponse	;Data ID 96
+		goto	WordResponse	;Data ID 97
+		goto	WordResponse	;Data ID 98
 		goto	MessageID99	;Data ID 99
 		goto	MessageID100	;Data ID 100
 		goto	ByteResponse	;Data ID 101
@@ -2551,10 +2551,10 @@ messagetable	goto	MessageID0	;Data ID 0
 		goto	TSPReadWrite	;Data ID 106
 		goto	TSPBufferSize	;Data ID 107
 		goto	TSPReadEntry	;Data ID 108
-		goto	FakeResponse	;Data ID 109
-		goto	FakeResponse	;Data ID 110
-		goto	FakeResponse	;Data ID 111
-		goto	FakeResponse	;Data ID 112
+		goto	WordResponse	;Data ID 109
+		goto	WordResponse	;Data ID 110
+		goto	WordResponse	;Data ID 111
+		goto	WordResponse	;Data ID 112
 		goto	WordResponse	;Data ID 113
 		goto	WordResponse	;Data ID 114
 		goto	WordResponse	;Data ID 115
@@ -2566,7 +2566,7 @@ messagetable	goto	MessageID0	;Data ID 0
 		goto	WordResponse	;Data ID 121
 		goto	WordResponse	;Data ID 122
 		goto	WordResponse	;Data ID 123
-		goto	FakeResponse	;Data ID 124
+		goto	WordResponse	;Data ID 124
 		goto	MessageID125	;Data ID 125
 		goto	MessageID126	;Data ID 126
 		goto	WordResponse	;Data ID 127
@@ -2825,7 +2825,7 @@ MessageID7	btfss	MsgResponse	;Don't modify responses
 		goto	setbyte4
 		
 MessageID8	btfsc	MsgResponse
-		goto	FakeResponse
+		goto	WordResponse
 		btfsc	SysCH2Setpoint	;Check if a setpoint has been specified
 		btfsc	AlternativeUsed	;Always modify if this is an alternative
 		goto	MsgID8Change
@@ -3484,16 +3484,11 @@ StoreValueLoop	skpnc
 ;AlternativeUsed being set.
 ;The clever combination of bit tests in the following code will end up at a
 ;return command for requests or alternative responses.
-FakeResponse	btfsc	BoilerResponse
-		btfss	AlternativeUsed
-		btfss	MsgResponse
-		return			;Not a message towards the thermostat
-		goto	ClearNoneResp
 ByteResponse	btfsc	BoilerResponse
 		btfss	AlternativeUsed
 		btfss	MsgResponse
 		return			;Not a message towards the thermostat
-		goto	ClearByteResp
+		bra	ClearByteResp
 MandatoryWord	call	MandatoryID	;Prevent the DataID getting blacklisted
 WordResponse	btfsc	BoilerResponse
 		btfss	AlternativeUsed
@@ -3501,7 +3496,7 @@ WordResponse	btfsc	BoilerResponse
 		return			;Not a message towards the thermostat
 ClearWordResp	clrf	databyte1
 ClearByteResp	clrf	databyte2
-ClearNoneResp	movfw	byte2		;Get the DataID
+		movfw	byte2		;Get the DataID
 		pcall	FindResponse
 		skpz
 		return			;No entry found for the DataID
