@@ -50,8 +50,8 @@ Compiling
 To create a hex file that can be loaded into the PIC16F1847 using OTmonitor
 or a PIC programmer, follow these steps:
 - Unpack the tarball in a convenient location:
-    wget -qO- https://otgw.tclcode.com/download/otgw-6.3.tgz | tar xzv
-- Go to the otgw-6.3 directory: cd otgw-6.3
+    wget -qO- https://otgw.tclcode.com/download/otgw-6.4.tgz | tar xzv
+- Go to the otgw-6.4 directory: cd otgw-6.4
 - Run: make
 
 The "build.asm" file is supposed to be auto-generated at the start of every
@@ -62,6 +62,9 @@ make command:
 
 To build the diagnose firmware:
     make diagnose.hex
+
+To build the interface firmware:
+    make interface.hex
 
 
 Testing
@@ -138,9 +141,9 @@ gpsim:
     make install
     cd ..
 
-otgw-6.3:
-    wget -qO- https://otgw.tclcode.com/download/otgw-6.3.tgz | tar xzv
-    cd otgw-6.3
+otgw-6.4:
+    wget -qO- https://otgw.tclcode.com/download/otgw-6.4.tgz | tar xzv
+    cd otgw-6.4
     make
     # Or, if $PREFIX/bin is not in your PATH:
     PATH=$PREFIX/bin:$PATH make
