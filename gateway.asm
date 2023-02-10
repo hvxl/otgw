@@ -5,7 +5,7 @@
 
 #define		version		"6.4"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"2"	;Comment out when not applicable
+#define 	patch		"3"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -1540,7 +1540,7 @@ TickTimer	bcf	PIR3,TMR4IF	;Clear Timer 4 overflow flag
 		return
 
 ; IdleTimer is called whenever timer 0 overflows
-IdleTimer
+IdleTimer	bcf	INTCON,TMR0IF	;Clear Timer 0 overflow flag
 		banksel	BreakTimer	;Bank 1
 		btfss	NoBreak
 		incf	BreakTimer,F
