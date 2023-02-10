@@ -5,7 +5,7 @@
 
 #define		version		"6.4"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"1"	;Comment out when not applicable
+#define 	patch		"2"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -1595,11 +1595,15 @@ CommandExpiry	decf	minutetimer,F	;Count down the expiry timer
 		andlw	b'11111000'	;Ignore least significant bits
 		btfss	HeartbeatCS	;CS command in the past minute?
 		skpnz			;Control setpoint >= 8?
-		bra	CommandExpiryC2	;Keep using the user control setpoint
+		bra	CommandExpiryJ1	;Keep using the user control setpoint
 		bsf	SysCtrlSetpoint	;Invalidate the control setpoint
-CommandExpiryC2	btfss	HeartbeatC2	;C2 command in the past minute?
+CommandExpiryJ1	movfw	controlsetpt3	;User defined control setpoint2
+		andlw	b'11111000'	;Ignore least significant bits
+		btfss	HeartbeatC2	;C2 command in the past minute?
+		skpnz			;Control setpoint >= 8?
+		bra	CommandExpiryJ2	;Keep using the user control setpoint
 		bsf	SysCH2Setpoint	;Invalidate the CH2 control setpoint
-		pagesel	StartTimer
+CommandExpiryJ2	pagesel	StartTimer
 		movlw	b'111'
 		andwf	heartbeatflags,W
 		skpz			;No commands in the past minute?
