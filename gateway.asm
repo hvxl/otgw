@@ -5,7 +5,7 @@
 
 #define		version		"6.4"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"3"	;Comment out when not applicable
+#define 	patch		"4"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -848,9 +848,6 @@ timer2idle	btfsc	BitClkCarry	;Bit transition happened on time?
 
 timer2xmit	btfsc	LineStable	;Nothing to do in a stable interval
 		return
-		tstf	bitcount
-		skpnz
-		goto	timer2xmitend
 		clrw			;Initialize work register
 		btfss	NextBit		;Find out the desired output level
 		movlw	b'00011000'	;Set bits matching the opentherm outputs
@@ -870,10 +867,9 @@ timer2xmit	btfsc	LineStable	;Nothing to do in a stable interval
 		skpnc			;Test the bit shifted out of the buffer
 		bsf	NextBit		;Next time, send a logical 1
 		clrf	quarter
-		decf	bitcount,F	;Test for the end of the message
+		decfsz	bitcount,F	;Test for the end of the message
 		return			;Return from the interrupt routine
-
-timer2xmitend	bcf	T2CON,TMR2ON	;Stop timer 2
+		bcf	T2CON,TMR2ON	;Stop timer 2
 		bcf	Transmit	;Finished transmitting
 		btfsc	outputmask,4	;Transmission to the thermostat?
 		bsf	Intermission	;Message exchange is finished
