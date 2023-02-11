@@ -5,7 +5,7 @@
 
 #define		version		"6.4"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"4"	;Comment out when not applicable
+#define 	patch		"5"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -632,9 +632,10 @@ InterruptVector	code	0x0004
 		;interrupt to get the correct overflow count
 		btfsc	PIR1,TMR2IF	;Check if timer 2 matched
 		call	timer2int
-		btfss	PIR2,C1IF	;Check if thermostat input changed
+		btfsc	PIR2,C1IF	;Check if thermostat input changed
+		call	input1int
 		btfsc	PIR2,C2IF	;Check if boiler input changed
-		call	inputint
+		call	input2int
 		retfie			;End of interrupt routine
 
 ;########################################################################
@@ -654,45 +655,44 @@ InterruptVector	code	0x0004
 
 		package	Interrupt
 
-;Comparator interrupt routine
-inputint	comf	tstatflags,W	;Get the inverted Smart power bits
+;Comparator 2 interrupt routine
+input2int	comf	tstatflags,W	;Get the inverted Smart power bits
 		banksel	CMOUT		;Bank 2
 		xorwf	CMOUT,W		;Read to end the mismatch condition
 		banksel	PIR2		;Bank 0
-		bcf	PIR2,C1IF	;Clear the interrupt, if comparator 1
-		bcf	PIR2,C2IF	;Clear the interrupt, if comparator 2
-		xorwf	msgflags,W	;Determine which comparator has changed
-		andlw	b'00000011'	;Filter out the comparator bits
-		xorwf	msgflags,F	;Update the saved state
-		btfsc	NoThermostat	;Opentherm thermostat attached?
-		andlw	b'00000010'	;Ignore the thermostat input
-		iorlw	0		;Update Z flag to represent value in W
-		skpnz			;Make sure there actually was a change
+		bcf	PIR2,C2IF	;Clear the interrupt
+		xorwf	msgflags,W	;Check if the comparator has changed
+		andlw	b'00000010'	;Filter out the comparator bit
+		skpnz			;There actually was a change
 		return			;False trigger
-		andlw	b'00000001'	;Check for a change from the thermostat
-		skpnz			;Thermostat wants attention
-		btfss	Request		;Or not receiving a request
-		goto	inputmark	;then continue
+		xorwf	msgflags,F	;Update the saved state
+		btfss	Request		;Listening to the thermostat?
+		bra	inputmark	;Handle the signal from the boiler
 		movlw	-1		;Suppress errors for a while
 		movwf	errornum
 		return
 
-;The thermostat may try to change power levels while the gateway is in the
-;process of transmitting a message, or receiving a message from the boiler.
-;The same timer is used for all opentherm communication, so the gateway can't
-;handle the two things at the same time. Ignoring the thermostat may result in
-;incorrect power levels leading to user-visible artefacts (like a flashing
-;backlight of the thermostat screen). So, for a smoother user experience, we
-;abort the current operation when the thermostat asks for attention.
-inputmark	skpz			;Z bit is cleared if comparator1 changed
-		btfsc	Request		;Already listening to the thermostat
-		goto	inputboiler	;Not a new event from the thermostat
+;Comparator 1 interrupt routine
+input1int	comf	tstatflags,W	;Get the inverted Smart power bits
+		banksel	CMOUT		;Bank 2
+		xorwf	CMOUT,W		;Read to end the mismatch condition
+		banksel	PIR2		;Bank 0
+		bcf	PIR2,C1IF	;Clear the interrupt
+		xorwf	msgflags,W	;Check if the comparator has changed
+		andlw	b'00000001'	;Filter out the comparator bit
+		skpnz			;There actually was a change
+		return			;False trigger
+		xorwf	msgflags,F	;Update the saved state
+		btfsc	NoThermostat	;Opentherm thermostat attached?
+		return
+		btfsc	Request		;A new event from the thermostat?
+		bra	inputmark	;Already listening to the thermostat
 		bsf	Request		;Receiving from the thermostat
 		tstf	bitcount	;Message in progress?
 		skpnz
 		btfsc	Transmit	;Transmission in progress?
 		goto	inputabort	;Abort message
-inputboiler	tstf	bitcount	;Is a message in progress?
+inputmark	tstf	bitcount	;Is a message in progress?
 		skpnz
 		goto	InputEvent	;Line state change outside message
 		movlw	3		;3 overflows of timer 2 = 750 us
@@ -719,6 +719,13 @@ inputboiler	tstf	bitcount	;Is a message in progress?
 inputspike	bcf	T2CON,TMR2ON	;Stop timer 2
 		goto	activity	;End of the interrupt routine
 
+;The thermostat may try to change power levels while the gateway is in the
+;process of transmitting a message, or receiving a message from the boiler.
+;The same timer is used for all opentherm communication, so the gateway can't
+;handle the two things at the same time. Ignoring the thermostat may result in
+;incorrect power levels leading to user-visible artefacts (like a flashing
+;backlight of the thermostat screen). So, for a smoother user experience, we
+;abort the current operation when the thermostat asks for attention.
 inputabort	clrf	bitcount	;Abort message
 		bcf	Transmit	;Clear flag
 		movlw	b'00011000'	;Default state of the outputs
