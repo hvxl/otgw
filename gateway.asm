@@ -5,7 +5,7 @@
 
 #define		version		"6.4"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"5"	;Comment out when not applicable
+#define 	patch		"6"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -455,6 +455,9 @@ onoffflags	res	1			;General bit flags
 #define		SendUserMessage	onoffflags,5	;User message in standalone mode
 #define		PriorityMsg	onoffflags,6
 #define		OneSecond	onoffflags,7	;Time to send the next message
+;When the thermostat is reconnected, the NoThermostat, HeatDemand, and
+;SendUserMessage bits must be cleared
+		constant	CONNECTMASK=b'11010011'
 
 statusflags	res	1			;Master status flags
 #define		CHModeOff	statusflags,0	;Must match ID0:HB0
@@ -1727,8 +1730,8 @@ CheckThermostat	bcf	PIR1,ADIF	;Clear flag for next round
 ;see a low line voltage before considering the thermostat to be reconnected.
 		skpc			;Logical low level?
 		goto	ThermostatEnd	;Not a logical low opentherm level
-		bcf	NoThermostat	;Thermostat was reconnected
-		bcf	HeatDemand
+		movlw	CONNECTMASK	;Mask for flags to be cleared
+		andwf	onoffflags,F	;Thermostat was reconnected
 		movlw	TConnect
 		pcall	PrintStringNL
 		return
