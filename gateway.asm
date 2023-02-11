@@ -5,7 +5,7 @@
 
 #define		version		"6.4"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"6"	;Comment out when not applicable
+#define 	patch		"7"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -299,6 +299,7 @@ byte3		res	1			;Must be in shared RAM
 byte4		res	1			;Must be in shared RAM
 #define		MsgParity	byte1,7
 #define		MsgResponse	byte1,6
+#define		MsgUnknown	byte1,5
 #define		MsgWriteOp	byte1,4
 
 originaltype	res	1
@@ -3204,7 +3205,12 @@ OverrideFuncEnd	bcf	OverrideFunc	;Override func has been sent
 ;The gateway implements version 3.0 of the opentherm protocol specification
 MessageID125	btfss	MsgResponse
 		return
-		call	messageack	;Turn request into acknowledgement
+		movfw	byte3		;Get the major version number
+		btfsc	MsgUnknown	;Did the boiler return a version?
+		call	messageack	;Turn request into acknowledgement W=0
+		addlw	-3		;Compare against minimum version
+		skpnc			;Boiler version below 3.0
+		return			;Keep using the boiler response
 		movlw	3
 		call	setbyte3	;Major version number
 		goto	setbyte4	;Minor version number
