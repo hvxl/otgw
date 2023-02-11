@@ -13,7 +13,7 @@
 ;5) Measure and report voltages detected on the Opentherm interfaces
 ;6) Measure periods of no activity on the opentherm lines.
 ;
-#define		version		"2.1"
+#define		version		"2.1.1"
 
 		__config	H'8007', B'00101111111100'
 		__config	H'8008', B'01101011111111'
@@ -58,6 +58,8 @@ tstatflags	res	1
 #define		NoThermostat	tstatflags,0
 #define		OneSecond	tstatflags,1
 #define		NextBit		tstatflags,3	;Must match SlaveOut
+ccpltemp	res	1
+ccphtemp	res	1
 
 Bank0data	udata
 testnum		res	1
@@ -191,37 +193,41 @@ test5interrupt	btfsc	PIR1,TMR2IF
 		call	timer2int
 		retfie
 
-MasterInt	clrf	TMR0
-		bcf	PIR3,CCP3IF
+MasterInt	bcf	PIR3,CCP3IF
+		banksel	CCPR3L		;Bank 6
+		movfw	CCPR3L
+		movwf	ccpltemp
+		movfw	CCPR3H
+		movwf	ccphtemp
+		movlw	b'1'
+		xorwf	CCP3CON,F
+StoreCapture
+		banksel	bufferhead	;Bank 0
+		clrf	TMR0
 		movlw	high buffer
 		movwf	FSR0H
 		lslf	bufferhead,W
 		movwf	FSR0L
+		sublw	240
+		skpz
+		skpc
+		return
 		incf	bufferhead,F
-		banksel	CCP3CON		;Bank 6
-		movlw	b'1'
-		xorwf	CCP3CON,F
-		movfw	CCPR3L
+		movfw	ccpltemp
 		movwi	FSR0++
-		movfw	CCPR3H
+		movfw	ccphtemp
 		movwi	FSR0++
 		return
 
-SlaveInt	clrf	TMR0
-		bcf	PIR3,CCP4IF
-		movlw	high buffer
-		movwf	FSR0H
-		lslf	bufferhead,W
-		movwf	FSR0L
-		incf	bufferhead,F
-		banksel	CCP4CON		;Bank 6
+SlaveInt	bcf	PIR3,CCP4IF
+		banksel	CCPR4L		;Bank 6
+		movfw	CCPR4L
+		movwf	ccpltemp
+		movfw	CCPR4H
+		movwf	ccphtemp
 		movlw	b'1'
 		xorwf	CCP4CON,F
-		movfw	CCPR4L
-		movwi	FSR0++
-		movfw	CCPR4H
-		movwi	FSR0++
-		return
+		bra	StoreCapture
 
 timer2int	bcf	PIR1,TMR2IF	;Clear the interrupt flag
 		tstf	quarter
@@ -1430,7 +1436,8 @@ PrintBusy	movwf	txtemp		;Temporarily save the character
 		subwf	txtail,W
 		skpz			;Buffer full?
 		bra	PrintQueue
-PrintWait	btfss	PIR1,TXIF	;Transmit register is empty?
+PrintWait	clrwdt
+		btfss	PIR1,TXIF	;Transmit register is empty?
 		bra	PrintWait	;Wait until space becomes available
 		call	PrintFlush	;Transmit a character from the queue
 PrintQueue	movlw	high txbuffer
