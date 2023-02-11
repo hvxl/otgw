@@ -26,6 +26,13 @@ const char *StatusCounters[] = {
     "Multiple responses"
 };
 
+static const unsigned short garbagedata[] = {
+    1473,972,1228,973,972,972,973,972,
+    972,973,1470,1228,1467,1474,1969,972,
+    972,973,1228,972,973,973,972,972,973,
+    972,1002,943,973,972,0
+};
+
 // Attribute class that allows the user to dynamically connect or disconnect
 // the thermostat
 class ModeAttribute : public Value {
@@ -324,8 +331,8 @@ public:
 
 // Transmitter class for sending an Opentherm message
 class Transmitter : public TriggerObject {
-   guint64 mask;
    guint32 msg, cnt;
+   const unsigned short *garbageptr = nullptr;
    bool bit, invert;
 
 public:
@@ -349,39 +356,62 @@ public:
        return invert;
    }
 
+   bool SendGarbage() {
+       // Some devices send a secondary protocol
+       if (cnt) return false;
+       garbageptr = garbagedata;
+       callback();
+       return true;
+   }
+
    bool SendMessage(guint32 _msg) {
        if (cnt) return false;
        msg = _msg;
-       mask = 0x100000000;
-       guint64 next = get_cycles().get(5e-4); // 0.5ms
-       get_cycles().set_break(next, this);
-       bit = true;
-       // printf("SendMessage: pin->putState(%g)\n", ot->GetVoltage(!invert));
-       pin->putState(ot->GetVoltage(!invert));
        cnt = 1;
+       if (!garbageptr) callback();
        return true;
    }
 
    void callback() override {
-       int halves = 1;
+       unsigned duration;
+       // Always toggle the line
        bit = !bit;
        // printf("callback: pin->putState(%g)\n", ot->GetVoltage(bit != invert));
        pin->putState(ot->GetVoltage(bit != invert));
-       if (mask == 0) {
-	   // Stopbit
-	   if (!bit) {
-	       cnt = 0;
-	       return;
-	   }
-       } else if (cnt & 1) {
-	   // Half bit transition
-	   mask >>= 1;
-	   // Double the time if the current bit and the next bit are different
-	   if ((mask && !(msg & mask)) != bit) halves = 2;
+
+       if (garbageptr) {
+           if (bit != invert) {
+               duration = 24;
+           } else if (*garbageptr) {
+               duration = *garbageptr++;
+           } else {
+               garbageptr = nullptr;
+               if (!cnt) return;
+               // Idle interval between garbage and the OT message
+               duration = 13271;
+           }
+       } else if (cnt == 1) {
+           // Start bit
+           // assert(bit == true);
+           duration = 500;
+           cnt++;
+       } else if (cnt >= 68) {
+           // Finished
+           // assert(bit == false);
+           cnt = 0;
+           return;
+       } else {
+           // calculate when to send 2 equal half-bits
+           guint64 dbl = msg ^ ((guint64)msg << 1 ^ 0x100000001ULL);
+           if (dbl >> (33 - cnt / 2) & 1) {
+               duration = 1000;
+               cnt += 2;
+           } else {
+               duration = 500;
+               cnt++;
+           }
        }
-       guint64 next = get_cycles().get(5e-4 * halves);
-       get_cycles().set_break(next, this);
-       cnt += halves;
+       get_cycles().set_break_delta(duration, this);
    }
 };
 
@@ -504,7 +534,7 @@ Opentherm::Opentherm(const char *_new_name, const char *_desc) : Module(_new_nam
     addSymbol(m_rxbuffer);
     m_report = new ReportAttribute(this);
     addSymbol(m_report);
-    
+
     ResetCounters();
 }
 
@@ -617,6 +647,8 @@ Thermostat::Thermostat(const char *name) : Opentherm(name, "Thermostat") {
     addSymbol(m_setpoint);
     m_power = new PowerAttribute(this);
     addSymbol(m_power);
+    m_garbage = new Boolean("garbage", false, "Dual protocol");
+    addSymbol(m_garbage);
 
     LogicalLevels(0.75, 1.85);
 }
@@ -635,6 +667,8 @@ Thermostat::~Thermostat() {
     delete m_setpoint;
     removeSymbol(m_power);
     delete m_power;
+    removeSymbol(m_garbage);
+    delete m_garbage;
 }
 
 const char *Thermostat::GetDevice() {
@@ -856,6 +890,7 @@ void Thermostat::callback() {
 	// Save the start time of sending the message
 	msg_time = get_cycles().get();
 	// printf("%lld Sending: %08X\n", msg_time, request[pointer]);
+	if (*m_garbage) m_xmit->SendGarbage();
 	SendMessage(request[pointer]);
 	// Set a timer for sending the next message
 	ScheduleMessage();
@@ -905,6 +940,8 @@ Boiler::Boiler(const char *name) : Opentherm(name, "Boiler") {
     addSymbol(m_responder);
     m_tsp = new TSPAttribute(this);
     addSymbol(m_tsp);
+    m_garbage = new Integer("garbage", 0, "Dual protocol");
+    addSymbol(m_garbage);
 
     LogicalLevels(0.1, 4.2);
 }
@@ -913,6 +950,10 @@ Boiler::~Boiler() {
     // Destructor
     removeSymbol(m_responder);
     delete m_responder;
+    removeSymbol(m_tsp);
+    delete m_tsp;
+    removeSymbol(m_garbage);
+    delete m_garbage;
 }
 
 const char *Boiler::GetDevice() {
@@ -1005,9 +1046,14 @@ void Boiler::NewRxMessage(unsigned msg) {
 	}
     }
     message = SetParity(message);
-    // A slave must not respond earlier than after 20ms
-    guint64 future_time = get_cycles().get(20e-3);
-    get_cycles().set_break(future_time, this);
+    gint64 garbage; 
+    m_garbage->get(garbage);
+    if (garbage > 0) {
+        get_cycles().set_break_delta(garbage, this);
+    } else {
+        // A slave must not respond earlier than after 20ms
+        get_cycles().set_break_delta(20000, this);
+    }
 }
 
 unsigned Boiler::Status(unsigned status) {
@@ -1079,6 +1125,9 @@ std::string Boiler::SummaryReport() {
 }
 
 void Boiler::callback() {
+    gint64 garbage; 
+    m_garbage->get(garbage);
+    if (garbage > 0) m_xmit->SendGarbage();
     // printf("Sending: %08X\n", message);
     SendMessage(message);
 }

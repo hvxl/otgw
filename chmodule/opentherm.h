@@ -69,6 +69,7 @@ class OTOutput;
 class Transmitter;
 class Receiver;
 class Float;
+class Integer;
 class Boolean;
 
 class Opentherm : public Module {
@@ -132,6 +133,7 @@ class Thermostat : public Opentherm, public TriggerObject {
    PowerAttribute *m_power;
    Float *m_interval, *m_roomtemp;
    Setpoint *m_setpoint;
+   Boolean *m_garbage;
    guint64 msg_time;
    guint32 request[64] = {};
    int request_count = 0, pointer = 0, msgid = -1, override = 0;
@@ -160,6 +162,7 @@ public:
 class Boiler : public Opentherm, public TriggerObject {
    RespondAttribute *m_responder;
    TSPAttribute *m_tsp;
+   Integer *m_garbage;
    guint64 mode_time, dhw_time;
    guint32 response[256] = {};
    guint32 message;
