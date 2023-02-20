@@ -5,7 +5,7 @@
 
 #define		version		"6.4"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"8"	;Comment out when not applicable
+#define 	patch		"9"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -370,7 +370,9 @@ operatingmode2	res	1
 #define		manualdhwpush	operatingmode1,4;Manual DHW push requested
 minutetimer	res	1
 #define		Expired		minutetimer,7
-
+fakesetpoint1	res	1
+fakesetpoint2	res	1
+#define         NoFakeSetpoint	fakesetpoint1,7
 SecCounter	res	1
 MessagePtr	res	1
 RemOverrideFunc	res	1
@@ -1266,6 +1268,7 @@ WaitConvert	btfsc	ADCON0,GO	;Check that A/D conversion is finished
 		bsf	SysMaxModLevel	;No user defined max modulation
 		bsf	SysCoolLevel	;No user defined cooling level
 		bsf	SysCH2Setpoint	;No user defined CH2 control setpoint
+		bsf	NoFakeSetpoint	;Don't send fake setpoint to boiler
 		bsf	InvalidTime	;No user specified time information
 
 		movlw	ONESEC
@@ -2898,9 +2901,9 @@ MessageID16	btfsc	MsgResponse
 		goto	missingdata	;Turn request into acknowledgement
 		btfsc	OverrideReq	;Check for pending override request
 		btfsc	OverrideWait	;Must actually send the request first
-		return
+		bra	roomsetptchange
 		btfsc	OverrideClr
-		goto	roomsetptclear
+		bra	roomsetptclear
 		;Another "nice" feature of the Remeha iSense thermostat: It
 		;doesn't set the setpoint to the exact value requested. So we
 		;have to allow for some variation. The delta chosen is 0.125
@@ -2915,14 +2918,15 @@ MessageID16	btfsc	MsgResponse
 		skpc
 		xorlw	-1		;Make the result positive
 		skpz
-		goto	roomsetptdiff	;Values differ more than 1 degree
+		bra	roomsetptdiff	;Values differ more than 1 degree
 		skpc			;Carry is set if setpoint <= value
 		comf	temp,F		;Invert the fraction
 		movlw	b'11100000'	;Only the lower 5 bits may be set
 		andwf	temp,W		;Reset the lower 5 bits
 		skpz			;Result should be 0 for a match
-		goto	roomsetptdiff	;Values differ more than 0.125 degrees
+		bra	roomsetptdiff	;Values differ more than 0.125 degrees
 		;Setpoint matches the request
+		call	roomsetptchange
 		btfsc	OverrideAct
 		return			;Override remains in effect
 		bsf	OverrideAct	;Override was picked up by thermostat
@@ -2933,18 +2937,24 @@ roomsetptclear	bcf	OverrideClr	;Override clear data has been sent
 		movfw	setpoint1
 		iorwf	setpoint2,W	;Check if there is a new setpoint
 		skpnz
-		goto	roomsetptreset
+		bra	roomsetptreset
 		bsf	OverrideWait	;The new setpoint must be sent next
+roomsetptchange	btfsc	NoFakeSetpoint
 		return
+		movfw	fakesetpoint1
+		call	setbyte3
+		movfw	fakesetpoint2
+		goto	setbyte4
 roomsetptdiff	btfss	OverrideAct	;Override currently active?
 		incf	override,F	;Make 3 attempts to set the override
 		btfss	OverrideAct	;Time to abandon override?
-		return
+		bra	roomsetptchange
 roomsetptcancel	btfsc	TStatISense	;Special treatment for iSense thermostat
-		goto	roomsetptreset
+		bra	roomsetptreset
 		clrf	setpoint1	;Reset the setpoint variables
 		clrf	setpoint2
-roomsetptreset	clrf	override	;Stop requesting a setpoint override
+roomsetptreset	call	roomsetptchange
+		clrf	override	;Stop requesting a setpoint override
 		movlw	'O'
 		goto	SwitchOffLED	;Switch off the override LED
 
@@ -3617,7 +3627,7 @@ SerialCmdTable	goto	SerialCmd00	; AA, MM, RR, TT commands
 		goto	SerialCmdLED	; LB command
 		goto	SerialCmd0F	; CL, LC commands
 		goto	SerialCmd10	; CS, GW, SC commands
-		goto	SerialCmd11	; CR, SB commands
+		goto	SerialCmd11	; BS, CR, SB commands
 		goto	SerialCmd12	; FT command
 #ifndef __DEBUG
 		retlw	CommandNG
@@ -3748,6 +3758,9 @@ SerialCmd11	movfw	INDF1
 		xorlw	'C' ^ 'S'
 		skpnz
 		goto	SetSetBack
+		xorlw	'S' ^ 'B'
+		skpnz
+		goto	SetFakeSetpoint
 		retlw	CommandNG
 
 SerialCmd12	movfw	INDF1
@@ -4130,6 +4143,17 @@ StoreTemp	movwf	FSR0L
 		movwf	INDF0
 		clrf	FSR0H
 		return
+
+SetFakeSetpoint	call	GetPercentArg	;Get the fake setpoint
+		skpnc
+		return
+		movwf	fakesetpoint1
+		movfw	float2
+		movwf	fakesetpoint2
+		iorwf	float1,W
+		skpnz
+		bsf	NoFakeSetpoint
+		goto	CommandFloat
 
 SetDebugPtr	call	CmdArgPointer
 		movfw	rxpointer
