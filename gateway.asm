@@ -5,7 +5,7 @@
 
 #define		version		"6.4"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"9"	;Comment out when not applicable
+#define 	patch		"10"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 

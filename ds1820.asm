@@ -6,6 +6,11 @@
 #include	"p16f1847.inc"
 		errorlevel	-302, -306
 
+#define CHECKCRC
+#ifdef NOCHECKCRC
+#undefine CHECKCRC
+#endif
+
 #define		IOPORT	PORTA,7		;I/O port used for 1-wire line
 
 ;1-wire ROM commands
@@ -26,7 +31,10 @@ Bank0data	UDATA
 sensorstage	res	1
 #define		ds18b20		sensorstage,7
 lsbstorage	res	1
-
+#ifdef CHECKCRC
+msbstorage	res	1
+crc		res	1
+#endif
 		extern	float1, float2, temp, StoreTempValue
 
 		global	Temperature
@@ -54,7 +62,16 @@ StageTable	goto	PresencePulse	;Step 0 - Transmit a reset pulse
 		goto	ReadCommand	;Step 9 - Send Read Scratchpad command
 		goto	ReadLSB		;Step 10 - Read temperature value, LSB
 		goto	ReadMSB		;Step 11 - Read temperature value, MSB
-Restart		setc			;Step 12 - Start over
+#ifdef CHECKCRC
+		goto	ReadByte	;Step 12 - Read user byte 1
+		goto	ReadByte	;Step 13 - Read user byte 2
+		goto	ReadByte	;Step 14 - Read config register (18B20)
+		goto	ReadByte	;Step 15 - Read reserved byte
+		goto	ReadByte	;Step 16 - Read count remain (18S20)
+		goto	ReadByte	;Step 17 - Read count per C (18S20)
+		goto	ReadCRC		;Step 18 - Read CRC
+#endif
+Restart		setc			;Step 12/19 - Start over
 		call	ReportResult	;Report the result back
 		retlw	DONE
 
@@ -92,13 +109,22 @@ ReadFamily	call	ReadByte	;Read family code from the 1-wire bus
 ReadCommand	movlw	READSCRATCHPAD	;The scratchpad contains the temerature
 		goto	WriteByte	;Send the command on the 1-wire bus
 
-ReadLSB		call	ReadByte	;Read the first scratchpad byte
+ReadLSB
+#ifdef CHECKCRC
+		clrf	crc
+#endif
+		call	ReadByte	;Read the first scratchpad byte
 		movfw	temp
 		movwf	lsbstorage	;Save the byte for later use
 		retlw	CONTINUE
 
 ReadMSB		call	ReadByte	;Read the second scratchpad byte
-		btfsc	ds18b20		;Check which sensor type was found
+#ifdef CHECKCRC
+		movfw	temp
+		movwf	msbstorage
+		retlw	CONTINUE
+#endif
+CalcTemperature	btfsc	ds18b20		;Check which sensor type was found
 		goto	HighPrecision	;A DS18B20 stores the value differently
 		rrf	temp,W		;Sign of the temperature value
 		rrf	lsbstorage,W	;Determine the full degrees
@@ -123,6 +149,16 @@ Success		xorlw	85		;Test against powerup value
 ReportResult	lcall	StoreTempValue	;Store the measurement
 		clrf	sensorstage	;Start a new round
 		retlw	CONTINUE
+
+#ifdef CHECKCRC
+ReadCRC		call	ReadByte	;Read the CRC
+		tstf	crc		;Check that the CRC ended up at 0
+		skpz			;CRC OK
+		goto	Restart		;Not a valid measurement
+		movfw	msbstorage
+		movwf	temp
+		goto	CalcTemperature
+#endif
 
 Delay480	call	Delay240	;480 = 2 * 240
 Delay240	movlw	240 - 8		;Value for 240uS delay (compensated)
@@ -160,10 +196,19 @@ ReadBit		bcf	IOPORT		;Prepare output latch
 		call	Delay10		;Allow device time to write the bit
 		btfsc	IOPORT		;Read the 1-wire bus
 		setc			;Device wrote a "1"
-		rrf	temp,F		;Shift bit into the result varaible
+		rrf	temp,F		;Shift bit into the result variable
+#ifdef CHECKCRC
+		rlf	temp,W		;Recover the input bit into the carry
+		rlf	CPSCON0,W	;Shift carry into bit 0 & clear carry
+		xorwf	crc,F		;Apply XOR of CRC bit 0 and the input
+		rrf	crc,W		;Shift the CRC right
+		skpnc
+		xorlw	0x8c		;Apply the polynomial function
+		movwf	crc		;Store the new CRC value
+#endif
 		movlw	45		;Maximum time a device drives the bus
 		call	Delay		;Wait for the device to release the bus
-		return
+		retlw	CONTINUE
 
 ReadRom		movlw	READROM		;Command to read a device's ROM code
 		goto	WriteByte	;Send the command on the 1-wire bus
