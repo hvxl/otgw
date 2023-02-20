@@ -5,7 +5,7 @@
 
 #define		version		"6.4"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"7"	;Comment out when not applicable
+#define 	patch		"8"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -4106,16 +4106,18 @@ ValueCleared	movlw	'-'
 StoreOutsideT	call	StoreOutTemp
 CommandFloat	lgoto	PrintSigned
 
-StoreTempValue	movlw	returnwater1
-		btfss	TempSensorFunc
+StoreTempValue	btfss	TempSensorFunc
 		goto	StoreOutTemp
 		bsf	ReturnInvalid	;Invalid until validity is checked
-		skpc			;Carry indicates a failed reading
+		skpnc			;Carry indicates a failed reading
+		return
 		bcf	ReturnInvalid
+		movlw	returnwater1
 		goto	StoreTempBank2
 StoreOutTemp	bsf	OutsideTemp
 		bsf	OutsideInvalid	;Invalid until validity is checked
-		skpc			;Carry indicates a failed reading
+		skpnc			;Carry indicates a failed reading
+		return
 		bcf	OutsideInvalid	;Outside temperature is valid
 		movlw	outside1
 		call	StoreTemp
