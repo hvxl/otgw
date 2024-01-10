@@ -5,7 +5,7 @@
 
 #define		version		"6.5"
 #define		phase		"."	;a=alpha, b=beta, .=production
-;#define 	patch		"10"	;Comment out when not applicable
+#define 	patch		"1"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -2553,9 +2553,9 @@ messagetable	goto	MessageID0	;Data ID 0
 		goto	TSPBufferSize	;Data ID 90
 		goto	TSPReadEntry	;Data ID 91
 		goto	WordResponse	;Data ID 92
-		goto	WordResponse	;Data ID 93
-		goto	WordResponse	;Data ID 94
-		goto	WordResponse	;Data ID 95
+		goto	StringCharacter	;Data ID 93
+		goto	StringCharacter	;Data ID 94
+		goto	StringCharacter	;Data ID 95
 		goto	WordResponse	;Data ID 96
 		goto	WordResponse	;Data ID 97
 		goto	WordResponse	;Data ID 98
@@ -3269,10 +3269,20 @@ TSPReadWrite	btfss	MsgResponse	;Only interested in requests ...
 		movfw	TSPValue
 		goto	setbyte4	;Fill in the value
 TSPReadEntry	btfss	MsgResponse	;Only interested in responses ...
-		goto	ByteResponse
+		return
 		btfsc	AlternativeUsed	;... not requested by the thermostat
 		incf	TSPIndex,F	;Index of next entry
 		movfw	TSPCount
+		subwf	TSPIndex,W	;Check if more entries exist
+		skpc
+		bsf	PriorityMsg	;Prepare to read next entry
+		return
+
+StringCharacter	btfss	MsgResponse	;Only interested in responses ...
+		return
+		btfsc	AlternativeUsed	;... not requested by the thermostat
+		incf	TSPIndex,F	;Index of next entry
+		movfw	byte3		;Count is in the high byte
 		subwf	TSPIndex,W	;Check if more entries exist
 		skpc
 		bsf	PriorityMsg	;Prepare to read next entry

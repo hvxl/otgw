@@ -1,0 +1,30 @@
+test "Read string with thermostat interfering"
+
+load boiler.stc
+Boiler.string = "93: Test"
+Boiler.string = "94: 1.0"
+Boiler.string = "95: 72374181-b95d-4c78-9f61-388934fe8c80"
+
+load thermostat.stc
+Thermostat.tx = 0x805D0300
+
+go 1500000
+Serial.tx = "DA=116\r"
+Serial.tx = "DA=117\r"
+Serial.tx = "DA=118\r"
+Serial.tx = "DA=119\r"
+Serial.tx = "DA=120\r"
+Serial.tx = "DA=121\r"
+Serial.tx = "DA=122\r"
+Serial.tx = "DA=123\r"
+
+go 3000000
+
+Serial.tx = "PM=93\r"
+go 40000000
+
+check R.05D.... R805D0000
+check R.05D.... R005D0100
+check R.05D.... R005D0200
+check R.05D.... R805D0300
+check R.05D.... {}

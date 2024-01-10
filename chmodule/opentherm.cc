@@ -279,6 +279,52 @@ public:
    }
 };
 
+class StringAttribute : public String {
+   Boiler *ot;
+
+public:
+   StringAttribute(Boiler *_ot)
+     : String("string", "", "Configure string"), ot(_ot)
+   {
+   }
+
+   void set(Value *v) {
+       if (typeid(*v) == typeid(String)) {
+	   char buff[256];
+	   v->get(buff, sizeof(buff));
+	   set(buff);
+       }
+   }
+
+   void set(const char *buffer, int len = 0) override {
+       if (buffer && *buffer) {
+           guint8 id, cnt = 0;
+           char str[256];
+           char *s, *p;
+           const std::string usage = " string format: <id>: <value>";
+           id = strtol(buffer, &s, 10);
+           if (!*s) {
+               ot->SetupStr(id);
+               return;
+           }
+           if (*s++ != ':') {
+               throw Error(usage);
+           }
+           while (isspace(*s)) s++;
+           len = strlen(s);
+           if (len > 255) { 
+               throw Error(" string too long (max: 255)");
+           }
+           strcpy(str, s);
+           ot->SetupStr(id, len, str);
+       }
+   }
+
+   std::string toString() override {
+       return "";
+   }
+};
+
 // I/O pin class for an Opentherm input. The pin will be connected to a PIC
 // digital output pin. The PIC output levels are inverted.
 class OTInput : public IO_bi_directional_pu {
@@ -940,6 +986,8 @@ Boiler::Boiler(const char *name) : Opentherm(name, "Boiler") {
     addSymbol(m_responder);
     m_tsp = new TSPAttribute(this);
     addSymbol(m_tsp);
+    m_str = new StringAttribute(this);
+    addSymbol(m_str);
     m_garbage = new Integer("garbage", 0, "Dual protocol");
     addSymbol(m_garbage);
 
@@ -1003,6 +1051,16 @@ void Boiler::NewRxMessage(unsigned msg) {
                 } else if (type == kWriteData) {
                     list[index] = msg;
                     message = msg | 0x40000000;
+                } else {
+                    return;
+                }
+            } else if (str.count(msgid)) {
+                int index = msg >> 8 & 0xff;
+                strdata &data = str[msgid];
+                if (index >= data.size()) {
+                    message = kDataInvalid << 28 | msg & 0xff0000 | data.size() << 8;
+                } else if (type == kReadData) {
+                    message = msg & 0x7fff0000 | 0x40000000 | data.size() << 8 | data[index];
                 } else {
                     return;
                 }
@@ -1104,6 +1162,14 @@ void Boiler::SetupTSP(guint8 id, guint8 cnt, guint8 *values) {
     SetResponse(SetParity(4 << 28 | id << 16 | cnt << 8));
     id++;
     tsp[id].assign(values, values + cnt);
+}
+
+void Boiler::SetupStr(guint8 id) {
+    str.erase(id);
+}
+
+void Boiler::SetupStr(guint8 id, guint8 len, char *data) {
+    str[id].assign(data, data + len);
 }
 
 void Boiler::ReceiveMode(bool b) {

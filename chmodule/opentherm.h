@@ -56,6 +56,7 @@ enum PowerStates {
 };
 
 typedef std::vector<guint8> tspdata;
+typedef std::vector<char> strdata;
 
 class ModeAttribute;
 class TransmitAttribute;
@@ -64,6 +65,7 @@ class RespondAttribute;
 class ReportAttribute;
 class PowerAttribute;
 class TSPAttribute;
+class StringAttribute;
 class OTInput;
 class OTOutput;
 class Transmitter;
@@ -162,6 +164,7 @@ public:
 class Boiler : public Opentherm, public TriggerObject {
    RespondAttribute *m_responder;
    TSPAttribute *m_tsp;
+   StringAttribute *m_str;
    Integer *m_garbage;
    guint64 mode_time, dhw_time;
    guint32 response[256] = {};
@@ -169,6 +172,7 @@ class Boiler : public Opentherm, public TriggerObject {
    unsigned masterstatus = 0, slavestatus = 0;
    double ctrlsetpoint;
    std::map<guint8, tspdata> tsp;
+   std::map<guint8, strdata> str;
 
 public:
    explicit Boiler(const char *);
@@ -179,6 +183,8 @@ public:
    unsigned Status(unsigned msg);
    void SetupTSP(guint8 id);
    void SetupTSP(guint8 id, guint8 cnt, guint8 list[]);
+   void SetupStr(guint8 id);
+   void SetupStr(guint8 id, guint8 len, char *data);
    virtual void ReceiveMode(bool b) override;
    virtual std::string SummaryReport();
    void callback() override;
