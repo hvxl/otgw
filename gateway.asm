@@ -5,7 +5,7 @@
 
 #define		version		"6.5"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"1"	;Comment out when not applicable
+#define 	patch		"2"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -2781,7 +2781,7 @@ BrandDetect	btfsc	byte3,0		;Smart power bit
 ;20 to specify a remote setpoint override.
 MessageID4	btfss	MsgResponse
 		return			;Don't modify requests
-		movwf	requestcode
+		movfw	requestcode
 		subwf	byte3,W
 		skpz			;Response matches code requested?
 		btfsc	byte1,5		;Read Ack or Write Ack?
@@ -3340,6 +3340,7 @@ AdminMessages	bsf	tempvar0,INITRP
 		retlw	0
 		movfw	requestcode
 		movwf	byte3
+		bsf	MsgWriteOp
 		retlw	MSG_REMOTECMD
 
 SendPriorityMsg	btfss	PriorityMsg
