@@ -74,15 +74,13 @@ A test suite is provided. Running it will verify that the covered features
 are still working after a code change. The test suite relies on the open
 source PIC simulator project gpsim [http://gpsim.sourceforge.net/].
 
-Support for the PIC16F1847 used in the OTGW is not currently included in the
-standard gpsim executable. But it is available in the p16f1847 branch. To
-build a version of gpsim that supports this pic requires some resources to
-be available. On linux these can be installed using the package manager.
+Support for the PIC16F1847 used in the OTGW was added in version 0.32.1.
+Building gpsim requires some resources to be available. On linux these can
+be installed using the package manager.
 
-This is how to build a version of gpsim that supports this PIC:
-    svn checkout svn://svn.code.sf.net/p/gpsim/code/branches/p16f1847 gpsim
-    cd gpsim
-    ./autogen.sh
+This is how to build gpsim 0.32.1:
+    wget -qO- https://sourceforge.net/projects/gpsim/files/gpsim/0.32.0/gpsim-0.32.1.tar.gz | tar xzv
+    cd gpsim-0.32.1
     ./configure --disable-gui
     make -j4
 Then as root:

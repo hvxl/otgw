@@ -4,9 +4,9 @@
 #include <cassert>
 #include <iostream>
 
-#include "packages.h"
-#include "stimuli.h"
-#include "value.h"
+#include <gpsim/packages.h>
+#include <gpsim/stimuli.h>
+#include <gpsim/value.h>
 
 #include "probe.h"
 

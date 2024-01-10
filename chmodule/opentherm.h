@@ -6,9 +6,9 @@
 
 #include <vector>
 #include <map>
-#include "modules.h"
-#include "value.h"
-#include "trigger.h"
+#include <gpsim/modules.h>
+#include <gpsim/value.h>
+#include <gpsim/trigger.h>
 
 enum OTDataTypes {
     kReadData = 0,

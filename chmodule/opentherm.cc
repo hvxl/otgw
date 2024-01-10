@@ -6,9 +6,9 @@
 #include <iostream>
 #include <iomanip>
 
-#include "packages.h"
-#include "stimuli.h"
-#include "processor.h"
+#include <gpsim/packages.h>
+#include <gpsim/stimuli.h>
+#include <gpsim/processor.h>
 
 #include "config.h"
 #include "opentherm.h"

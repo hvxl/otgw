@@ -4,7 +4,7 @@
 /* IN_MODULE should be defined for modules */
 #define IN_MODULE
 
-#include "modules.h"
+#include <gpsim/modules.h>
 
 class ProbeStateAttribute;
 class ProbeVoltageAttribute;
