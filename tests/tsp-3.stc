@@ -6,14 +6,7 @@ load thermostat.stc
 Thermostat.tx = 0x000B0200
 
 go 1500000
-Serial.tx = "DA=116\r"
-Serial.tx = "DA=117\r"
-Serial.tx = "DA=118\r"
-Serial.tx = "DA=119\r"
-Serial.tx = "DA=120\r"
-Serial.tx = "DA=121\r"
-Serial.tx = "DA=122\r"
-Serial.tx = "DA=123\r"
+clearalttable
 
 go 3000000
 

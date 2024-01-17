@@ -1,0 +1,14 @@
+test "remote request"
+constraint p16f1847
+
+load boiler.stc
+Boiler.response = 0x500401FF
+
+load thermostat.stc
+go 3000000
+
+Serial.tx = "RR=1\r"
+go 25000000
+
+check R.004.... R90040100
+check R.004.... {}

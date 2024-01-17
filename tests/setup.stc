@@ -82,6 +82,18 @@ attach INVD InverterD.out LedD.in
 node voltref
 attach voltref porta2
 
+# Delete all default alternatives
+clearalttable macro
+Serial.tx = "DA=116\r"
+Serial.tx = "DA=117\r"
+Serial.tx = "DA=118\r"
+Serial.tx = "DA=119\r"
+Serial.tx = "DA=120\r"
+Serial.tx = "DA=121\r"
+Serial.tx = "DA=122\r"
+Serial.tx = "DA=123\r"
+endm
+
 ### Helper macros for tcltest
 
 # Add a test description (handled by tcltest)

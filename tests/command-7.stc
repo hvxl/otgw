@@ -1,0 +1,14 @@
+test "user provided outside temperature"
+constraint p16f1847
+
+load boiler.stc
+load thermostat.stc
+Boiler.response = 0xD01BFE9A
+
+go 4000000
+Serial.tx = "OT=-1.4\r"
+
+go 10000000
+
+check R101BFE9A
+check A401BFE9A

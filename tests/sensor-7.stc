@@ -1,0 +1,36 @@
+test "keep sending outside temperature"
+constraint p16f1847
+
+module library libgpsim_extras
+module load DS18B20 sensor
+module load pu pullup
+node GPIOB
+attach GPIOB porta7 pullup.pin sensor.pin 
+pullup.resistance = 4700
+sensor.temperature = 4.3
+
+load boiler.stc
+# Can't use thermostat.stc, that would request outside temperature
+Thermostat.tx = 0x80000200
+Thermostat.tx = 0x10010A00
+Thermostat.tx = 0x100E0000
+Thermostat.tx = 0x00120000
+Thermostat.tx = 0x00180000
+Thermostat.tx = 0x80190000
+Thermostat.tx = 0x801C0000
+
+go 1500000
+clearalttable
+
+Serial.tx = "AA=27\r"
+go 3000000
+
+Serial.tx = "PR=G\r"
+Serial.tx = "GB=7\r"
+
+go 32000000
+check R101B0450
+check R101B0450
+check R101B0450
+check R101B0450
+check R101B0450

@@ -1,0 +1,26 @@
+test "stop sending outside temperature"
+constraint p16f1847
+
+module library libgpsim_extras
+module load DS18B20 sensor
+module load pu pullup
+node GPIOB
+attach GPIOB porta7 pullup.pin sensor.pin 
+pullup.resistance = 4700
+sensor.temperature = 4.3
+
+load boiler.stc
+load thermostat.stc
+
+go 2000000
+
+Serial.tx = "PR=G\r"
+Serial.tx = "GB=7\r"
+
+go 12000000
+check R101B0450
+check R101B0450
+check R101B0450
+check T001B0000
+check R101B0450 {}
+check A401B0450

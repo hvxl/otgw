@@ -5,7 +5,7 @@
 
 #define		version		"6.5"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"2"	;Comment out when not applicable
+#define 	patch		"3"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -386,7 +386,7 @@ GPIOFunction	res	1			;Funtions assigned to GPIO pins
 
 flags		res	1			;General bit flags
 #define		OutsideTemp	flags,0
-#define		OutsideInvalid	flags,1
+#define		SensorInvalid	flags,1
 #define		SummaryRequest	flags,2
 #define		BoilerAlive	flags,3
 #define		BoilerFault	flags,4
@@ -454,7 +454,7 @@ onoffflags	res	1			;General bit flags
 #define		maxchupdate	onoffflags,1	;Must match ID6:LB1
 #define		NoThermostat	onoffflags,2
 #define		HeatDemand	onoffflags,3
-#define		ReturnInvalid	onoffflags,4
+#define		ExternalSensor	onoffflags,4	;External sensor configured
 #define		SendUserMessage	onoffflags,5	;User message in standalone mode
 #define		PriorityMsg	onoffflags,6
 #define		OneSecond	onoffflags,7	;Time to send the next message
@@ -2596,8 +2596,10 @@ messageack	movfw	originaltype	;Get original request type
 		btfss	byte1,7
 		andlw	b'01111111'	;Match parity bit of the received msg
 setbyte1	xorwf	byte1,W		;Check if the byte is different
-		skpz
+		skpnz
+		retlw	0
 		bsf	AlternativeUsed	;Going to modify the message
+		bcf	OverrideUsed	;Modifying more than the data bytes
 		xorwf	byte1,F		;Set the byte
 		retlw	0
 
@@ -2970,22 +2972,36 @@ MessageID20	btfss	MsgResponse
 		goto	setbyte4
 
 ;Return the outside temperature, if specified via the serial interface
-MessageID27	btfsc	MsgResponse	;Do not modify a request
-		btfss	OutsideTemp	;Do nothing if no outside temp available
+MessageID27	btfsc	ExternalSensor	;Not using an external sensor
+		btfsc	TempSensorFunc	;Sensor is used for outside temp
+		bra	UserOutsideTemp	;User provided the outside temperature
+		btfsc	AlternativeUsed
+		call	MandatoryID
+		btfsc	SensorInvalid	;Last sensor reading was valid
+		bra	OutsideInvalid	;Report invalid data
+UserOutsideTemp	btfss	OutsideTemp	;Do nothing if no outside temp available
 		return
-		btfsc	OutsideInvalid
-		goto	messageinv
-		call	messageack	;Turn request into acknowledgement
+		movfw	originaltype	;Get original request type
+		iorlw	b'01000000'	;Make it a matching acknowledgement
+		btfss	MsgResponse	;Sending a response
+		movlw	T_WRITE		;Turn it into a "Write-Data" request
+		call	setbyte1	;Set the message type
 		movfw	outside1
 		call	setbyte3
 		movfw	outside2
 		goto	setbyte4
+OutsideInvalid	btfsc	MsgResponse	;Sending a request
+		goto	messageinv	;Return "Data-Invalid" response
+		movlw	T_INV
+		goto	setbyte1	;Send "Invalid-Data" request
 
 ;Return the return water temperature, if obtained via a temperature sensor
-MessageID28	btfsc	MsgResponse	;Do not modify a request
+MessageID28	btfss	MsgResponse	;Do not modify a request
+		return
+		btfsc	ExternalSensor	;Not using an external sensor
 		btfss	TempSensorFunc	;Do nothing if no return water sensor
 		return
-		btfsc	ReturnInvalid
+		btfsc	SensorInvalid
 		goto	messageinv
 		call	messageack	;Turn request into acknowledgement
 		banksel	returnwater1	;Bank 2
@@ -3141,7 +3157,6 @@ ID99ReadData	btfss	opermodewrite
 		return
 		movlw	T_WRITE
 		call	setbyte1	;Turn request into a write
-		bcf	OverrideUsed	;Changing more than just the data bytes
 		bra	OperModeData
 
 ID99ReadAck	btfsc	initflags,INITOM
@@ -3913,13 +3928,13 @@ SerialCmdGPIO	movfw	INDF1
 		movwf	FSR1L		;Point to the GPIO port letter
 		movlw	b'11110000'	;Mask to clear old GPIO A function
 		btfsc   INDF1,0		;Configuring GPIO B?
-		goto	SetGPIOFunction
-		andwf	GPIOFunction,W	;GPIO B function code in high nibble
-		xorlw	0x70		;Old GPIO B function was DS1820?
-		skpnz
-		bcf	OutsideTemp	;Forget outside temperature
+		bra	SetGPIOFunction
 		swapf	temp,F		;Move new function code to upper nibble
 		movlw	b'1111'		;Mask to clear old GPIO B function
+		btfsc	ExternalSensor	;Old GPIO B function was not DS1820?
+		btfss	TempSensorFunc	;DS1820 used for outside temperature?
+		bra	SetGPIOFunction
+		bcf	OutsideTemp	;Forget outside temperature
 SetGPIOFunction	andwf	GPIOFunction,W	;Clear the old function code
 		iorwf	temp,W		;Insert the new function code
 		movwf	GPIOFunction	;Store in RAM
@@ -4130,19 +4145,14 @@ ValueCleared	movlw	'-'
 StoreOutsideT	call	StoreOutTemp
 CommandFloat	lgoto	PrintSigned
 
-StoreTempValue	btfss	TempSensorFunc
-		goto	StoreOutTemp
-		bsf	ReturnInvalid	;Invalid until validity is checked
+StoreTempValue	bsf	SensorInvalid
 		skpnc			;Carry indicates a failed reading
 		return
-		bcf	ReturnInvalid
+		bcf	SensorInvalid
 		movlw	returnwater1
-		goto	StoreTempBank2
-StoreOutTemp	bsf	OutsideTemp
-		bsf	OutsideInvalid	;Invalid until validity is checked
-		skpnc			;Carry indicates a failed reading
-		return
-		bcf	OutsideInvalid	;Outside temperature is valid
+		btfsc	TempSensorFunc
+		bra	StoreTempBank2
+StoreOutTemp	bsf	OutsideTemp	;Outside temperature available
 		movlw	outside1
 		call	StoreTemp
 		movlw	outsideval1
@@ -5131,9 +5141,11 @@ gpio_init	bsf	gpio_port1	;Set up the port mask for gpio port 1
 		bsf	gpio_port2
 gpio_initport	clrc
 		movfw	GPIOFunction
-		btfsc	gpio_port2
+		btfss	gpio_port2
+		bra	gpio_initport1
 		swapf	GPIOFunction,W
-		andlw	b'1111'		;Use only the low nibble
+		bcf	ExternalSensor
+gpio_initport1	andlw	b'1111'		;Use only the low nibble
 		brw			;Jump into the jump table
 gpio_inittab	goto	gpio_input	;GPIO_NONE
 		goto	gpio_initgnd	;GPIO_GND
@@ -5159,9 +5171,9 @@ gpio_invalid	movlw	b'11110000'
 		setc
 		retlw	BadValue
 
-gpio_onewire	movlw	b'11110000'
-		btfss	gpio_port2	;Function is only supported on port 2
-		andwf	GPIOFunction,F	;Disable function on port 1
+gpio_onewire	btfss	gpio_port2	;Function is only supported on port 2
+		bra	gpio_invalid	;Disable function on port 1
+		bsf	ExternalSensor
 gpio_input	movfw	gpio_mask	;Get the port mask
 		andlw	b'11000000'	;Mask of the other bits
 		banksel	TRISA		;Bank 1
