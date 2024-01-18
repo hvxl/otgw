@@ -5,7 +5,7 @@
 
 #define		version		"6.5"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"3"	;Comment out when not applicable
+#define 	patch		"4"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -1938,6 +1938,7 @@ PrintDebug	movfw	DebugPointerL
 		call	PrintHex
 		goto	NewLine
 
+PrintIndexed	movwf	valueindex
 PrintStoredVal	movfw	valueindex
 		addwf	valueindex,W
 		addlw	valuestorage
@@ -2137,7 +2138,7 @@ PrintTable	retlw	PrintSettingA	;PR=A
 		retlw	PrintSettingB	;PR=B
 		retlw	PrintSettingC	;PR=C
 		goto	PrintSettingD	;PR=D
-		retlw	BadValue	;PR=E
+		goto	PrintSettingE	;PR=E
 		retlw	BadValue	;PR=F
 		goto	PrintSettingG	;PR=G
 		retlw	BadValue	;PR=H
@@ -2272,6 +2273,16 @@ PrintSettingD	call	PrintSettingID
 		btfsc	TempSensorFunc
 		movlw	'R'
 		goto	PrintChar
+
+PrintSettingE	call	PrintSettingID
+		movlw	'-'
+		btfsc	ExternalSensor	;External sensor not configured?
+		btfsc	SensorInvalid	;Sensor reading is valid?
+		goto	PrintChar	;No value to report
+		movlw	15		;Index for outsideval in valuestorage
+		btfsc	TempSensorFunc	;Sensor configured for outside temp
+		movlw	16		;Index for returnwater in valuestorage
+		goto	PrintIndexed
 
 PrintSummary	movfw	rxpointer
 		sublw	4

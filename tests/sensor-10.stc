@@ -1,0 +1,31 @@
+test "report DS18B20 return water temperature"
+constraint p16f1847
+
+module library libgpsim_extras
+module load DS18B20 sensor
+module load pu pullup
+node GPIOB
+attach GPIOB porta7 pullup.pin sensor.pin 
+pullup.resistance = 4700
+sensor.temperature = 27.9
+
+load boiler.stc
+load thermostat.stc
+
+go 3000000
+
+Serial.tx = "PR=G\r"
+Serial.tx = "GB=7\r"
+Serial.tx = "TS=R\r"
+go 4000000
+check "TS: R"
+
+Serial.tx = "PR=E\r"
+go 5000000
+check "PR: E=27.94"
+
+sensor.temperature = 24.1
+go 6000000
+Serial.tx = "PR=E\r"
+go 7000000
+check "PR: E=24.13"

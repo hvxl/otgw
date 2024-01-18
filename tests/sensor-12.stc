@@ -1,0 +1,13 @@
+test "report with sensor not connected"
+constraint p16f1847
+
+load boiler.stc
+load thermostat.stc
+
+go 3000000
+Serial.tx = "GB=7\r"
+
+go 5000000
+Serial.tx = "PR=E\r"
+go 6000000
+check "PR: E=-\n"
