@@ -114,11 +114,7 @@ SELFPROG
 		movlw	b'11100111'	;Pins 3 and 4 are digital ouputs
 		movwf	TRISA
 		;Set the LEDS as outputs
-#ifndef LVP
 		movlw	b'00000111'
-#else
-		movlw	b'00001111'
-#endif
 		movwf	TRISB
 
 		banksel	ANSELA		;Bank 3

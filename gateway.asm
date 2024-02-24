@@ -13,11 +13,7 @@
 ;this file, and for a DISCLAIMER OF ALL WARRANTIES.
 
 		__config	H'8007', B'00101111111100'
-#ifndef LVP
-		__config	H'8008', B'01101011111111'
-#else
 		__config	H'8008', B'11101011111111'
-#endif
 
 		errorlevel	-302
 
@@ -1035,8 +1031,6 @@ Start
 		;Port B
 		;Pins 2 and 5 are used by the USART.
 		;Pins 3, 4, 6, and 7 are used to indicate events for debugging
-		;RB3 can't be used when LVP is enabled, but the datasheet still
-		;advices to clear the TRISB bit to avoid problems with pull-ups.
 		clrf	ANSELB		;No analog I/O on port B
 
 		banksel	APFCON0		;Bank 2
@@ -1311,11 +1305,9 @@ UnknownJump2	movlw	b'111'
 
 		;Initialize the LED functions
 		clrf	temp
-#ifndef LVP
 		movlw	FunctionLED1
 		call	ReadEpromData
 		pcall	SetLEDFunction
-#endif
 		incf	temp,F
 		movlw	FunctionLED2
 		call	ReadEpromData
@@ -3656,11 +3648,7 @@ SerialCmdTable	goto	SerialCmd00	; AA, MM, RR, TT commands
 		goto	SerialCmdLED	; LF command
 		goto	SerialCmd0B	; CH command
 		retlw	CommandNG
-#ifndef LVP
 		goto	SerialCmdLED	; LA command
-#else
-		retlw	CommandNG
-#endif
 		goto	SerialCmdLED	; LB command
 		goto	SerialCmd0F	; CL, LC commands
 		goto	SerialCmd10	; CS, GW, SC commands
@@ -5290,15 +5278,9 @@ SavedSettings	de	23 | 1 << 5 | 1 << 6	;Set IgnoreErr1 and OverrideHigh
 FunctionGPIO	de	GPIO_NONE | GPIO_NONE << 4
 AwaySetpoint	de	16, 0
 PrintSettingL	de	"L="
-#ifdef LVP
-FunctionLED1	de	'-'
-FunctionLED2	de	'F'
-FunctionLED3	de	'X'
-#else
 FunctionLED1	de	'F'
 FunctionLED2	de	'X'
 FunctionLED3	de	'O'
-#endif
 FunctionLED4	de	'M'
 FunctionLED5	de	'P'
 FunctionLED6	de	'C'
