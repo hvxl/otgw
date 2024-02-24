@@ -1,0 +1,80 @@
+---
+name: Build firmware
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      gputils: "http://downloads.sourceforge.net/\
+        project/gputils/gputils/1.5.0/gputils-1.5.2.tar.bz2"
+      gpsim: "https://downloads.sourceforge.net/\
+        project/gpsim/gpsim/0.32.0/gpsim-0.32.1.tar.gz"
+
+    steps:
+      - name: Install necessary packages
+        run: sudo apt install -y libpopt-dev
+
+      - name: Install gputils
+        run: |
+          wget -qO- $gputils | tar xjv
+          cd gputils-1.5.2
+          ./configure
+          make -j2
+          sudo make install-exec install-data
+
+      - name: Install gpsim
+        run: |
+          wget -qO- $gpsim | tar xzv
+          cd gpsim-0.32.1
+          ./configure --disable-gui
+          make -j2
+          sudo make install
+
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Build the firmware
+        run: make gateway.hex diagnose.hex interface.hex
+
+      - name: Build chmodule
+        run: |
+          cd chmodule
+          ./autogen.sh
+          ./configure
+          make
+
+      - name: Run test suite
+        run: make test
+
+      - name: Upload gateway firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway
+          path: |
+            gateway.hex
+            gateway.cod
+            gateway.lst
+            gateway.map
+
+      - name: Upload diagnose firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnose
+          path: |
+            diagnose.hex
+            diagnose.cod
+            diagnose.lst
+            diagnose.map
+
+      - name: Upload interface firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: interface
+          path: |
+            interface.hex
+            interface.cod
+            interface.lst
+            interface.map
