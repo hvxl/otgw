@@ -16,7 +16,7 @@
 #define		version		"2.1.1"
 
 		__config	H'8007', B'00101111111100'
-		__config	H'8008', B'01101011111111'
+		__config	H'8008', B'11101011111111'
 
 		errorlevel	-302
 

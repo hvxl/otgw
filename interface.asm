@@ -13,7 +13,7 @@
 ;this file, and for a DISCLAIMER OF ALL WARRANTIES.
 
 		__config	H'8007', B'00101111111100'
-		__config	H'8008', B'01101011111111'
+		__config	H'8008', B'11101011111111'
 
 		errorlevel	-302, -312
 
