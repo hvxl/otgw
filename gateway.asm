@@ -5,7 +5,7 @@
 
 #define		version		"6.5"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"5"	;Comment out when not applicable
+#define		patch		"5"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -368,7 +368,7 @@ minutetimer	res	1
 #define		Expired		minutetimer,7
 fakesetpoint1	res	1
 fakesetpoint2	res	1
-#define         NoFakeSetpoint	fakesetpoint1,7
+#define		NoFakeSetpoint	fakesetpoint1,7
 SecCounter	res	1
 MessagePtr	res	1
 RemOverrideFunc	res	1
@@ -3858,7 +3858,7 @@ SerialCmd14	movfw	INDF1
 SerialCmd15	movfw	INDF1
 		xorlw	'B'
 		skpnz
-		goto 	SetDHWBlock
+		goto	SetDHWBlock
 		retlw	CommandNG
 
 SerialCmd17	movfw	INDF1
@@ -3900,7 +3900,7 @@ SerialCmd1D	movfw	INDF1
 SerialCmd1E	movfw	INDF1
 		xorlw	'S'
 		skpnz
-		goto 	SetSummerMode
+		goto	SetSummerMode
 		retlw	CommandNG
 
 SerialCmd1F	movfw	INDF1
@@ -3981,7 +3981,7 @@ SerialCmdGPIO	movfw	INDF1
 		movlw	rxbuffer + 1
 		movwf	FSR1L		;Point to the GPIO port letter
 		movlw	b'11110000'	;Mask to clear old GPIO A function
-		btfsc   INDF1,0		;Configuring GPIO B?
+		btfsc	INDF1,0		;Configuring GPIO B?
 		bra	SetGPIOFunction
 		swapf	temp,F		;Move new function code to upper nibble
 		movlw	b'1111'		;Mask to clear old GPIO B function
@@ -4317,8 +4317,8 @@ SetHotWater	movfw	rxpointer
 		sublw	'P'
 		skpnz
 		bra	SetHotWaterPush
-		clrf    dhwpushflags    ;Abort any manual DHW push
-		bcf     manualdhwpush
+		clrf	dhwpushflags	;Abort any manual DHW push
+		bcf	manualdhwpush
 		bcf	HotWaterSwitch
 		bcf	HotWaterEnable
 		addlw	'1' - 'P'
