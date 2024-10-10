@@ -5,7 +5,7 @@
 
 #define		version		"6.5"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define		patch		"5"	;Comment out when not applicable
+#define		patch		"6"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -2162,7 +2162,7 @@ PrintTable	retlw	PrintSettingA	;PR=A
 		retlw	PrintSettingC	;PR=C
 		goto	PrintSettingD	;PR=D
 		goto	PrintSettingE	;PR=E
-		retlw	BadValue	;PR=F
+		goto	PrintSettingF	;PR=F
 		goto	PrintSettingG	;PR=G
 		retlw	BadValue	;PR=H
 		goto	PrintSettingI	;PR=I
@@ -2318,6 +2318,24 @@ PrintSettingE	call	PrintSettingID
 		btfsc	TempSensorFunc	;Sensor configured for outside temp
 		movlw	16		;Index for returnwater in valuestorage
 		goto	PrintIndexed
+
+PrintSettingF	call	PrintSettingID
+		banksel	EEADRL		;Bank 3
+		movlw	low 0x8008
+		movwf	EEADRL
+		clrf	EEADRH
+		bsf	EECON1,CFGS
+		bcf	INTCON,GIE
+		bsf	EECON1,RD
+		nop
+		nop
+		bsf	INTCON,GIE
+		movfw	EEDATH
+		movlb	0		;Bank 0
+		andlw	1 << 5		;LVP bit
+		skpz
+		movlw	1		;LVP is enabled
+		goto	PrintDigit
 
 PrintSummary	movfw	rxpointer
 		sublw	4
