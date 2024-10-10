@@ -1,0 +1,17 @@
+test "set short message interval"
+constraint p16f1847
+
+load boiler.stc
+
+# Disconnect the thermostat
+Thermostat.mode = off
+
+go 3000000
+Serial.tx = "MI=99\r"
+
+go 6000000
+
+check {MI: 100}
+check R80190000
+check R80190000
+

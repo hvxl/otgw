@@ -1,0 +1,19 @@
+test "out of range message interval"
+constraint p16f1847
+
+load boiler.stc
+
+# Disconnect the thermostat
+Thermostat.mode = off
+
+go 3000000
+
+Serial.tx = "MI=97\r"
+go 3100000
+check {MI: OR}
+
+# The default interval should not be changed
+
+Serial.tx = "PR=N\r"
+go 3200000
+check {PR: N=1000}

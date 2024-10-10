@@ -111,5 +111,10 @@ SECTION    NAME=Bank4data  RAM=gpr4
 SECTION    NAME=Bank5data  RAM=gpr5
 SECTION    NAME=Bank6data  RAM=gpr6
 SECTION    NAME=Bank7data  RAM=gpr7
+SECTION    NAME=Bank8data  RAM=gpr8
+SECTION    NAME=Bank9data  RAM=gpr9
+SECTION    NAME=Bank10data RAM=gpr10
+SECTION    NAME=Bank11data RAM=gpr11
+SECTION    NAME=Bank12data RAM=gpr12
 // Make sure that the overlay section ends up in bank 0
 SECTION    NAME=testdata   RAM=gpr0

@@ -5,7 +5,7 @@
 
 #define		version		"6.5"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define 	patch		"4"	;Comment out when not applicable
+#define 	patch		"5"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -453,7 +453,7 @@ onoffflags	res	1			;General bit flags
 #define		ExternalSensor	onoffflags,4	;External sensor configured
 #define		SendUserMessage	onoffflags,5	;User message in standalone mode
 #define		PriorityMsg	onoffflags,6
-#define		OneSecond	onoffflags,7	;Time to send the next message
+#define		MsgTrigger	onoffflags,7	;Time to send the next message
 ;When the thermostat is reconnected, the NoThermostat, HeatDemand, and
 ;SendUserMessage bits must be cleared
 		constant	CONNECTMASK=b'11010011'
@@ -517,9 +517,11 @@ conf		res	1			;Saved in EEPROM
 #define		HotWaterSwitch	conf,4
 #define		HotWaterEnable	conf,5
 
-;The ds1820 package also uses 2 bytes in bank 0:
+;The ds1820 package also uses 4 bytes in bank 0:
 ;sensorstage	res	1
 ;lsbstorage	res	1
+;msbstorage	res	1
+;crc		res	1
 
 		global	float1, float2, flags, temp, StoreTempValue
 
@@ -591,6 +593,10 @@ txbuffer	res	TXBUFSIZE
 
 #define		SlaveMask	b'00001000'
 #define		MasterMask	b'00010000'
+
+Bank8data	UDATA
+MsgInterval	res	1
+IntervalCounter	res	1
 
 package		macro	pkg
 pkg		code
@@ -1220,8 +1226,18 @@ WaitConvert	btfsc	ADCON0,GO	;Check that A/D conversion is finished
 		btfss	FailSafeMode
 		bsf	RCSTA,CREN	;Enable serial receive
 
-		;Configure timer 4
-		banksel	T4CON		;Bank 8
+		movlw	MessageInterval
+		call	ReadEpromData
+
+		;Configure timer 6, interrupt every 5 ms when running
+		banksel	T6CON		;Bank 8
+		movwf	MsgInterval
+		movlw	249		;Reset every 250 counts
+		movwf	PR6
+		movlw	b'0100001'	;1:4 prescaler, 1:5 postscaler, off
+		movwf	T6CON
+
+		;Configure timer 4, interrupt every 20 ms
 		movlw	249		;Reset every 250 counts
 		movwf	PR4
 		movlw	b'0100110'	;1:16 prescaler, 1:5 postscaler
@@ -1365,6 +1381,9 @@ MainLoop	clrwdt
 
 		btfsc	PIR3,TMR4IF
 		call	TickTimer
+
+		btfsc	PIR3,TMR6IF
+		call	MessageTimer
 
 		btfsc	PIR1,ADIF
 		call	CheckThermostat
@@ -1530,15 +1549,24 @@ TickTimer	bcf	PIR3,TMR4IF	;Clear Timer 4 overflow flag
 		return
 		btfsc	BoilerAlive	;Ever received a message from boiler?
 		incf	repeatcount,F	;Keep track of repeated messages
-		bsf	OneSecond	;Trigger new message in stand-alone mode
-		movlw	ONESEC
-		movwf	SecCounter	;Reload second counter
 		incfsz	boilercom,W	;Increment variable without rolling over
 		movwf	boilercom
 		movlw	5
 		subwf	boilercom,W	;Check for 5 seconds without a message
 		skpnc
 		bcf	SlaveOut	;Prevent unwanted heating
+TriggerMessage	bsf	MsgTrigger	;Trigger new message in stand-alone mode
+		movlw	ONESEC
+		movwf	SecCounter	;Reload second counter
+		return
+
+;MessageTimer is called whenever timer 6 overflows (every 5 ms)
+MessageTimer	bcf	PIR3,TMR6IF	;Clear Timer 6 overflow flag
+		banksel	T6CON		;Bank 8
+		decf	IntervalCounter,F
+		movlb	0		;Bank 0
+		skpnz
+		bra	TriggerMessage
 		return
 
 ; IdleTimer is called whenever timer 0 overflows
@@ -1763,9 +1791,9 @@ Unstable
 		btfss	NoThermostat
 		return
 ThermostatEnd	btfss	MonitorMode	;Can't send messages in monitor mode
-		btfss	OneSecond	;Time to send the next message?
+		btfss	MsgTrigger	;Time to send the next message?
 		return
-		movlw	T_READ
+StandAloneMsg	movlw	T_READ
 		movwf	byte1
 		clrf	byte3
 		clrf	byte4
@@ -1780,7 +1808,10 @@ ThermostatEnd	btfss	MonitorMode	;Can't send messages in monitor mode
 		call	StoreValue	;... store the value we're sending
 		movfw	byte2
 		movwf	originalreq
-		bcf	OneSecond	;Message prepared - clear trigger
+		banksel	T6CON		;Bank 8
+		bcf	T6CON,TMR6ON	;Prevent further triggers
+		movlb	0		;Bank 0
+		bcf	MsgTrigger	;Message prepared - clear trigger
 		;Need lgoto because PCLATH points to the Message package
 		lgoto	SendMessage	;Start sending the message
 
@@ -2139,7 +2170,7 @@ PrintTable	retlw	PrintSettingA	;PR=A
 		retlw	BadValue	;PR=K
 		retlw	PrintSettingL	;PR=L
 		goto	PrintSettingM	;PR=M
-		retlw	BadValue	;PR=N
+		goto	PrintSettingN	;PR=N
 		goto	PrintSettingO	;PR=O
 		goto	PrintSettingP	;PR=P
 		goto	PrintSettingQ	;PR=Q
@@ -2194,6 +2225,18 @@ PrintSettingM	call	PrintSettingID
 PrintGateway	movlw	'G'
 		btfsc	MonitorMode
 		movlw	'M'
+		goto	PrintChar
+
+PrintSettingN	call	PrintSettingID
+		banksel	MsgInterval	;Bank 8
+		movfw	MsgInterval
+		movlb	0		;Bank 0
+PrintInterval	movwf	temp2
+		lsrf	temp2,W
+		call	PrintByte
+		movlw	'0'
+		btfsc	temp2,0
+		movlw	'5'
 		goto	PrintChar
 
 PrintSettingQ	call	PrintSettingID
@@ -2365,6 +2408,7 @@ StoreDataBytes	movfw	byte3
 ;Vendor specific ID's can go through the code below without causing any trouble
 ;because the mask returned by UnknownMask will be 0.
 HandleResponse	bsf	BoilerAlive	;Received a message from the boiler
+		call	StartInterval	;Start the message interval timer
 		movfw	byte2
 		xorwf	prioritymsgid,W	;Response matches ID of priority msg?
 		skpnz
@@ -2443,6 +2487,14 @@ RemoteCommand	call	TreatMessage	;Process the received message
 		movwf	byte4
 		bcf	Unsolicited
 		goto	SetParity
+
+StartInterval	banksel	T6CON		;Bank 8
+		movfw	MsgInterval
+		movwf	IntervalCounter
+		clrf	TMR6
+		bsf	T6CON,TMR6ON
+		movlb	0		;Bank 0
+		return
 
 ;Define special treatment based on the message ID. This code will be called in
 ;three situations:
@@ -3639,7 +3691,7 @@ SerialCmdTable	goto	SerialCmd00	; AA, MM, RR, TT commands
 		goto	SerialCmd01	; RS, SR commands
 		goto	SerialCmd02	; PR, KI commands
 		goto	SerialCmd03	; PS command
-		goto	SerialCmd04	; SW, TP, VR commands
+		goto	SerialCmd04	; MI, SW, TP, VR commands
 		goto	SerialCmd05	; DA, GB, MH, VS commands
 		goto	SerialCmd06	; CE, GA commands
 		goto	SerialCmd07	; OH, TS commands
@@ -3724,6 +3776,9 @@ SerialCmd04	movfw	INDF1
 		xorlw	'S' ^ 'T'
 		skpnz
 		goto	SlaveParameter
+		xorlw	'T' ^ 'M'
+		skpnz
+		goto	SetInterval
 		retlw	CommandNG
 
 SerialCmd05	movfw	INDF1
@@ -4441,6 +4496,46 @@ SetDHWBlock	call	CheckBoolean
 		bsf	DHWBlocking
 		goto	GoPrintDigit
 
+SetInterval	decf	rxpointer,W	;Pointer to the last character
+		addwf	FSR1L,F
+		movfw	INDF1		;Get the last character
+		sublw	'9'
+		sublw	'9' - '0'	;Check that the character is a digit
+		skpc
+		retlw	SyntaxError
+		movwf	tempvar2	;Save for later use
+		clrf	INDF1		;Remove the last char from the command
+		call	CmdArgPointer
+		tstf	INDF1		;Check that there is anything left
+		skpnz
+		retlw	OutOfRange	;1 digit is definitely out of range
+		call	GetDecimal	;Get the value of the remaining chars
+		skpnc
+		return			;Return any error encountered
+		tstf	INDF1		;Check for end of command
+		skpz
+		retlw	SyntaxError
+		movwf	temp		;Save the original arg divided by 10
+		addwf	temp,F		;Double the value
+		skpnc
+		retlw	OutOfRange
+		btfsc	tempvar2,3	;Last digit was 8 or higher
+		incf	temp,F
+		movfw	tempvar2
+		sublw	2		;Last digit was higher than 2
+		skpc
+		incf	temp,F		;The original arg divided by 5 (rounded)
+		movlw	100 / 5		;Minimum interval is 100ms
+		subwf	temp,W
+		skpc
+		retlw	OutOfRange
+		movlw	MessageInterval
+		call	WriteEpromData	;Store new message interval in EEPROM
+		banksel	MsgInterval	;Bank 8
+		movwf	MsgInterval
+		movlb	0		;Bank 0
+		lgoto	PrintInterval
+		
 SaveConfig	movfw	conf
 		movwf	temp
 		movlw	Configuration
@@ -5289,6 +5384,7 @@ TStatModel	de	0
 Configuration	de	0
 DHWSetting	de	0, 0	;Must immediately follow Configuration
 MaxCHSetting	de	0, 0	;Must immediately follow DHWSetting
+MessageInterval	de	200
 
 PrintSettingA	de	"A="
 GreetingStr	de	"OpenTherm Gateway ", version
