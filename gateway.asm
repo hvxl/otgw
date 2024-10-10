@@ -507,7 +507,6 @@ TSPValue	res	1
 settings	res	1			;Bits 0-4: voltage reference
 #define		IgnoreErr1	settings,5	;For bouncing high<->low changes
 #define		OverrideHigh	settings,6	;Copy MsgID100 data to high byte
-#define		NoFailSafe	settings,7	;No fall back to fail safe mode
 
 boilercom	res	1
 
@@ -517,6 +516,7 @@ conf		res	1			;Saved in EEPROM
 #define		SummerMode	conf,3
 #define		HotWaterSwitch	conf,4
 #define		HotWaterEnable	conf,5
+#define		NoFailSafe	conf,6	;No fall back to fail safe mode
 
 ;The ds1820 package also uses 4 bytes in bank 0:
 ;sensorstage	res	1
@@ -5242,10 +5242,11 @@ RemoteRequest	call	GetDecimalArg
 SetFailSafety	call	CheckBoolean
 		skpc
 		return
-		xorlw	1		;Inverse logic
-		lsrf	WREG,W
-		movlw	1 << 7		;Mask for the NoFailSafe bit
-		goto	SetSetting	;Update setting and store in EEPROM
+		bcf	NoFailSafe
+		skpnz
+		bsf	NoFailSafe	;Inverse logic
+		call	SaveConfig
+		goto	PrintBufChar3
 
 ;************************************************************************
 ; Implement the GPIO port functions
