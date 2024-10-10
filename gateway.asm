@@ -5,7 +5,7 @@
 
 #define		version		"6.5"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define		patch		"6"	;Comment out when not applicable
+#define		patch		"7"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -507,6 +507,7 @@ TSPValue	res	1
 settings	res	1			;Bits 0-4: voltage reference
 #define		IgnoreErr1	settings,5	;For bouncing high<->low changes
 #define		OverrideHigh	settings,6	;Copy MsgID100 data to high byte
+#define		NoFailSafe	settings,7	;No fall back to fail safe mode
 
 boilercom	res	1
 
@@ -1063,8 +1064,10 @@ Start
 		clrw
 		swapf	WREG,W
 		movwf	mode
+		bsf	FailSafeMode	;Assume fail safe mode
 		btfss	STATUS,NOT_TO
-		bsf	FailSafeMode
+		btfss	NoFailSafe	;Fail safe mode is disabled by user
+		bcf	FailSafeMode	;Clear fail safe mode
 		movlw	b'1111'
 		movwf	PCON
 
@@ -2321,16 +2324,17 @@ PrintSettingE	call	PrintSettingID
 
 PrintSettingF	call	PrintSettingID
 		banksel	EEADRL		;Bank 3
-		movlw	low 0x8008
+		movlw	low 0x8008	;Configuration word 2
 		movwf	EEADRL
 		clrf	EEADRH
-		bsf	EECON1,CFGS
+		bsf	EECON1,CFGS	;Select config space
 		bcf	INTCON,GIE
 		bsf	EECON1,RD
 		nop
 		nop
 		bsf	INTCON,GIE
 		movfw	EEDATH
+		bcf	EECON1,CFGS	;Deselect config space
 		movlb	0		;Bank 0
 		andlw	1 << 5		;LVP bit
 		skpz
@@ -3730,7 +3734,7 @@ SerialCmdTable	goto	SerialCmd00	; AA, MM, RR, TT commands
 		goto	$		; WD command
 #endif
 		goto	SerialCmd14	; DP command
-		goto	SerialCmd15	; BW command
+		goto	SerialCmd15	; BW, FS command
 		retlw	CommandNG
 		goto	SerialCmd17	; TC command
 		retlw	CommandNG
@@ -3878,6 +3882,9 @@ SerialCmd15	movfw	INDF1
 		xorlw	'B'
 		skpnz
 		goto	SetDHWBlock
+		xorlw	'B' ^ 'F'
+		skpnz
+		goto	SetFailSafety
 		retlw	CommandNG
 
 SerialCmd17	movfw	INDF1
@@ -5231,6 +5238,14 @@ RemoteRequest	call	GetDecimalArg
 		movwf	requestcode
 		bsf	initflags,INITRR
 		lgoto	PrintByte
+
+SetFailSafety	call	CheckBoolean
+		skpc
+		return
+		xorlw	1		;Inverse logic
+		lsrf	WREG,W
+		movlw	1 << 7		;Mask for the NoFailSafe bit
+		goto	SetSetting	;Update setting and store in EEPROM
 
 ;************************************************************************
 ; Implement the GPIO port functions
