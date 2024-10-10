@@ -3804,6 +3804,7 @@ SerialCmd07	movfw	INDF1
 		skpnz
 		goto	SetOverrideHigh
 		xorlw	'O' ^ 'T'
+		skpnz
 		goto	SetSensorFunc
 		retlw	CommandNG
 
