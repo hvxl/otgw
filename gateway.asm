@@ -3,9 +3,9 @@
 
 ;Copyright (c) 2022 - Schelte Bron
 
-#define		version		"6.5"
+#define		version		"6.6"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define		patch		"8"	;Comment out when not applicable
+;#define	patch		"8"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
