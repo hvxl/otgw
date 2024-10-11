@@ -5,7 +5,7 @@
 
 #define		version		"6.5"
 #define		phase		"."	;a=alpha, b=beta, .=production
-#define		patch		"7"	;Comment out when not applicable
+#define		patch		"8"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
 #include	build.asm
 
@@ -426,12 +426,12 @@ tstatflags	res	1	;Used in- and outside interrupt routine
 #define		PowerReport	tstatflags,7
 
 override	res	1
-#define		OverrideBlink	override,7	;Keep track of blinking LED
+#define		OverrideAct	override,7	;Override activity has happened
 #define		OverrideWait	override,6	;Override has not yet been sent
 #define		OverrideFunc	override,5	;ID100 has not yet been sent
 #define		OverrideClr	override,4	;Cancel override request
 #define		OverrideReq	override,3	;Override temp was requested
-#define		OverrideAct	override,2	;Override accepted by thermostat
+#define		OverrideSet	override,2	;Override accepted by thermostat
 ;Bits 0&1 are used as a counter to allow 3 attempts for the override to stick
 
 initflags	res	1
@@ -1609,14 +1609,11 @@ FlashTimer	bcf	PIR1,TMR1IF	;Clear timer overrun flag
 		btfss	Expired
 		call	CommandExpiry
 		btfsc	OverrideReq
-		btfsc	OverrideAct
+		btfsc	OverrideSet
 		return			;No override request pending
 		;Override requested, but not active. Flash the override LED
-		movlw	1 << 7		;Mask for the OverrideBlink bit
-		xorwf	override,F
-		andwf	override,W
 		movlw	'O'
-		pcall	SwitchLED
+		pcall	ToggleLED
 		return
 
 CommandExpiry	decf	minutetimer,F	;Count down the expiry timer
@@ -2215,7 +2212,7 @@ PrintOvrSetPt	swapf	RemOverrideFunc,W ;Get the current bits in lower nibble
 		movlw	'T'
 		btfss	ProgChangePrio	;Either pending or current state
 		movlw	'C'
-		btfss	OverrideAct	;Override accepted by the thermostat?
+		btfss	OverrideSet	;Override accepted by the thermostat?
 		iorlw	0x20		;Switch to lowercase
 		call	PrintChar	;Print the override type
 		movfw	setpoint1	;Copy the setpoint
@@ -2946,11 +2943,13 @@ MsgID9Change	call	messageack	;Turn request into acknowledgement
 		btfss	OverrideClr
 		movfw	setpoint2
 		call	setbyte4	;Data byte 2 has the fraction
+		btfsc	OverrideWait
+		bsf	OverrideAct
 		bcf	OverrideWait	;Override has been requested
 		btfsc	TStatCelcia	;Remeha Celcia thermostat?
 		btfss	OverrideReq	;And override requested?
 		return
-		btfss	OverrideAct	;And override not yet active?
+		btfss	OverrideSet	;And override not yet active?
 		bsf	Unsolicited	;Then resend the request on next msg
 		return
 
@@ -3006,10 +3005,9 @@ MessageID16	btfsc	MsgResponse
 		bra	roomsetptdiff	;Values differ more than 0.125 degrees
 		;Setpoint matches the request
 		call	roomsetptchange
-		btfsc	OverrideAct
+		btfsc	OverrideSet
 		return			;Override remains in effect
-		bsf	OverrideAct	;Override was picked up by thermostat
-		bcf	OverrideBlink
+		bsf	OverrideSet	;Override was picked up by thermostat
 		movlw	'O'
 		goto	SwitchOnLED	;Switch on the override LED
 roomsetptclear	bcf	OverrideClr	;Override clear data has been sent
@@ -3024,9 +3022,9 @@ roomsetptchange	btfsc	NoFakeSetpoint
 		call	setbyte3
 		movfw	fakesetpoint2
 		goto	setbyte4
-roomsetptdiff	btfss	OverrideAct	;Override currently active?
+roomsetptdiff	btfss	OverrideSet	;Override currently active?
 		incf	override,F	;Make 3 attempts to set the override
-		btfss	OverrideAct	;Time to abandon override?
+		btfss	OverrideSet	;Time to abandon override?
 		bra	roomsetptchange
 roomsetptcancel	btfsc	TStatISense	;Special treatment for iSense thermostat
 		bra	roomsetptreset
@@ -3646,11 +3644,10 @@ ClearByteResp	clrf	databyte2
 ;************************************************************************
 
 SwitchLED	skpnz			;Zero bit indicates LED state
-		goto	SwitchOffLED
-
+		bra	SwitchOffLED
 SwitchOnLED	addlw	functions - 'A'	;Point into the table of functions
 		movwf	FSR0L		;Setup indirect addressing
-		bsf	INDF0,0		;Remember that this function is on
+DoSwitchOnLED	bsf	INDF0,0		;Remember that this function is on
 		movlw	b'11111110'	;Mask off the state bit
 		andwf	INDF0,W		;Get the LED(s) for the function
 		skpnz
@@ -3663,7 +3660,7 @@ SwitchOnLED	addlw	functions - 'A'	;Point into the table of functions
 
 SwitchOffLED	addlw	functions - 'A'	;Point into the table of functions
 		movwf	FSR0L		;Setup indirect addressing
-		bcf	INDF0,0		;Remember that this function is off
+DoSwitchOffLED	bcf	INDF0,0		;Remember that this function is off
 		movfw	INDF0		;Get the LED for the function
 		skpnz
 		retlw	'B'		;No LED is assigned to this function
@@ -3671,6 +3668,12 @@ SwitchOffLED	addlw	functions - 'A'	;Point into the table of functions
 		andlw	b'110'
 		iorwf	gpioflags,F	;Switch off virtual LEDs E/F
 		retlw	'B'		;Save some movlw 'B' instructions
+
+ToggleLED	addlw	functions - 'A' ;Point into the table of functions
+		movwf	FSR0L		;Setup indirect addressing
+		btfss	INDF0,0
+		bra	DoSwitchOnLED
+		bra	DoSwitchOffLED
 
 ;************************************************************************
 ; Parse commands received on the serial interface
@@ -4070,7 +4073,8 @@ SetSetPoint	xorwf	RemOverrideFunc,W ;Store function bits in lower nibble
 		skpz			;There is no old setpoint
 		bsf	OverrideClr	;Clear old setpoint before setting new
 		movlw	1 << 4		;Leave OverrideClr bit intact
-SetSetPointJ1	andwf	override,F	;Clear old state information
+SetSetPointJ1	iorlw	1 << 7		;Keep the OverrideAct bit
+		andwf	override,F	;Clear old state information
 		movfw	float2		;Copy the value to the setpoint vars
 		movwf	setpoint2
 		movfw	float1
@@ -4106,9 +4110,15 @@ CelciaValue	movfw	setpoint1
 		movfw	setpoint2
 		movwf	float2
 		return
-ClearSetPoint	bsf	OverrideClr	;Override request to be cancelled
+ClearSetPoint	btfss	OverrideAct
+		bra	CancelSetPoint
+		bsf	OverrideClr	;Override request to be cancelled
 		bcf	ManChangePrio
 		bcf	ProgChangePrio
+		return
+CancelSetPoint	clrf	override
+		movlw	'O'
+		pcall	SwitchOffLED
 		return
 
 SetSetBack	call	GetPosFloatArg	;Parse floating point value
