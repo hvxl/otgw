@@ -3,7 +3,7 @@
 
 ;Copyright (c) 2022 - Schelte Bron
 
-#define		version		"6.6"
+#define		version		"6.7"
 #define		phase		"."	;a=alpha, b=beta, .=production
 ;#define	patch		"8"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
@@ -369,6 +369,9 @@ minutetimer	res	1
 fakesetpoint1	res	1
 fakesetpoint2	res	1
 #define		NoFakeSetpoint	fakesetpoint1,7
+fakeroomtemp1	res	1
+fakeroomtemp2	res	1
+#define		NoFakeRoomTemp	fakeroomtemp1,7
 SecCounter	res	1
 MessagePtr	res	1
 RemOverrideFunc	res	1
@@ -2558,7 +2561,7 @@ messagetable	goto	MessageID0	;Data ID 0
 		goto	WordResponse	;Data ID 21
 		goto	WordResponse	;Data ID 22
 		goto	WordResponse	;Data ID 23
-		goto	WordResponse	;Data ID 24
+		goto	MessageID24	;Data ID 24
 		goto	MandatoryWord	;Data ID 25
 		goto	WordResponse	;Data ID 26
 		goto	MessageID27	;Data ID 27
@@ -2663,6 +2666,10 @@ messagetable	goto	MessageID0	;Data ID 0
 		goto	MessageID126	;Data ID 126
 		goto	WordResponse	;Data ID 127
 
+messagewrite	btfss	AlternativeUsed
+		retlw	0
+		movlw	T_WRITE
+		bra	setbyte1
 messageinv	movlw	B_INV
 		bra	setbyte1
 messageack	movfw	originaltype	;Get original request type
@@ -3021,7 +3028,8 @@ roomsetptchange	btfsc	NoFakeSetpoint
 		movfw	fakesetpoint1
 		call	setbyte3
 		movfw	fakesetpoint2
-		goto	setbyte4
+		call	setbyte4
+		goto	messagewrite
 roomsetptdiff	btfss	OverrideSet	;Override currently active?
 		incf	override,F	;Make 3 attempts to set the override
 		btfss	OverrideSet	;Time to abandon override?
@@ -3045,6 +3053,18 @@ MessageID20	btfss	MsgResponse
 		call	setbyte3
 		movfw	clock2
 		goto	setbyte4
+
+;Send a user specified room temperature to the boiler
+;Some heat pumps implement their own control mechanism based on room setpoint
+;and temperature, rather than the control setpoint
+MessageID24	btfss	MsgResponse
+		btfsc	NoFakeRoomTemp
+		goto	WordResponse
+		movfw	fakeroomtemp1
+		call	setbyte3
+		movfw	fakeroomtemp2
+		call	setbyte4
+		goto	messagewrite
 
 ;Return the outside temperature, if specified via the serial interface
 MessageID27	btfsc	ExternalSensor	;Not using an external sensor
@@ -3718,7 +3738,7 @@ SerialCmdTable	goto	SerialCmd00	; AA, MM, RR, TT commands
 		goto	SerialCmd03	; PS command
 		goto	SerialCmd04	; MI, SW, TP, VR commands
 		goto	SerialCmd05	; DA, GB, MH, VS commands
-		goto	SerialCmd06	; CE, GA commands
+		goto	SerialCmd06	; CE, GA, RT commands
 		goto	SerialCmd07	; OH, TS commands
 		goto	SerialCmdLED	; LD command
 		goto	SerialCmdLED	; LE command
@@ -3822,6 +3842,9 @@ SerialCmd06	movfw	INDF1
 		xorlw	'C'
 		skpnz
 		goto	SetCoolEnable
+		xorlw	'C' ^ 'R'
+		skpnz
+		goto	SetRoomTemp
 		goto	SerialCmdGPIO
 
 SerialCmd07	movfw	INDF1
@@ -4264,6 +4287,17 @@ SetFakeSetpoint	call	GetPercentArg	;Get the fake setpoint
 		iorwf	float1,W
 		skpnz
 		bsf	NoFakeSetpoint
+		goto	CommandFloat
+
+SetRoomTemp	call	GetPercentArg
+		skpnc
+		return
+		movwf	fakeroomtemp1
+		movfw	float2
+		movwf	fakeroomtemp2
+		iorwf	float1,W
+		skpnz
+		bsf	NoFakeRoomTemp
 		goto	CommandFloat
 
 SetDebugPtr	call	CmdArgPointer

@@ -1,0 +1,22 @@
+test "send room temperature to the heat pump"
+# Ticket https://otgw.tclcode.com/support/tktview/93df967e49
+
+constraint p16f1847
+
+load boiler.stc
+Boiler.response = 0x50180000
+
+# Disconnect the thermostat
+Thermostat.mode = off
+
+go 1500000
+clearalttable
+
+go 2000000
+Serial.tx = "RT=25.41\r"
+Serial.tx = "AA=24\r"
+Serial.tx = "MI=120\r"
+
+# Run for some time
+go 8000000
+check R10181969

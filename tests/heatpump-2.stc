@@ -1,0 +1,20 @@
+test "send cooling level to a heat pump"
+
+constraint p16f1847
+
+load boiler.stc
+Boiler.response = 0x50070000
+
+load thermostat.stc
+Thermostat.interval = 0.15
+
+go 1500000
+clearalttable
+
+go 2000000
+Serial.tx = "CL=94.38\r"
+Serial.tx = "AA=7\r"
+
+# Run for some time
+go 18000000
+check R10075E62

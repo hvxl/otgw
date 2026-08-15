@@ -39,5 +39,5 @@ clean:
 
 .PHONY: clean test
 
-# # Include a local make file, if it exists
+# Include a local make file, if it exists
 -include Makefile-local.mk
