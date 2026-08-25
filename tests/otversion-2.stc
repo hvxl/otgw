@@ -1,0 +1,19 @@
+test "raise opentherm version reported by the boiler"
+
+constraint p16f1847
+
+load boiler.stc
+Boiler.response = 0x507D0234
+
+load thermostat.stc
+Thermostat.tx = 0x007D0000
+Thermostat.interval = 0.15
+
+go 1500000
+clearalttable
+
+go 2000000
+
+# Run for some time
+go 4000000
+check AC07D0300

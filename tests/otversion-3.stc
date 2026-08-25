@@ -1,0 +1,20 @@
+test "pass through opentherm version reported by the boiler"
+
+constraint p16f1847
+
+load boiler.stc
+Boiler.response = 0xC07D041A
+
+load thermostat.stc
+Thermostat.tx = 0x007D0000
+Thermostat.interval = 0.15
+
+go 1500000
+clearalttable
+
+go 2000000
+
+# Run for some time
+go 18000000
+check BC07D041A
+check A.07D.... {}

@@ -3,7 +3,7 @@
 
 ;Copyright (c) 2022 - Schelte Bron
 
-#define		version		"6.7"
+#define		version		"6.8"
 #define		phase		"."	;a=alpha, b=beta, .=production
 ;#define	patch		"8"	;Comment out when not applicable
 ;#define	bugfix		"1"	;Comment out when not applicable
@@ -3330,9 +3330,16 @@ MessageID125	btfss	MsgResponse
 		btfsc	MsgUnknown	;Did the boiler return a version?
 		call	messageack	;Turn request into acknowledgement W=0
 		addlw	-3		;Compare against minimum version
-		skpnc			;Boiler version below 3.0
+		skpc			;Boiler version 3.0 or above
+		bra	RaiseOTVersion
+		addlw	-2		;OTGW does not support OT v5.0
+		skpc			;Bolier version 5.0 or above
 		return			;Keep using the boiler response
-		movlw	3
+LowerOTVersion	movlw	4
+		call	setbyte3	;Major version number
+		movlw	51
+		goto	setbyte4	;Minor version number
+RaiseOTVersion	movlw	3
 		call	setbyte3	;Major version number
 		goto	setbyte4	;Minor version number
 
