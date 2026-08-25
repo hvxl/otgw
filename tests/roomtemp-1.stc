@@ -1,0 +1,20 @@
+test "forward room temperature to the boiler"
+
+constraint p16f1847
+
+load boiler.stc
+Boiler.response = 0x50180000
+
+load thermostat.stc
+Thermostat.tx = 0x10180000
+Thermostat.interval = 0.15
+Thermostat.temperature = 23.91
+
+go 1500000
+clearalttable
+
+go 2000000
+
+# Run for some time
+go 18000000
+check B501817E8

@@ -1285,6 +1285,7 @@ WaitConvert	btfsc	ADCON0,GO	;Check that A/D conversion is finished
 		bsf	SysCoolLevel	;No user defined cooling level
 		bsf	SysCH2Setpoint	;No user defined CH2 control setpoint
 		bsf	NoFakeSetpoint	;Don't send fake setpoint to boiler
+		bsf	NoFakeRoomTemp	;Don't send fake room temp to boiler
 		bsf	InvalidTime	;No user specified time information
 
 		movlw	ONESEC
