@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Install necessary packages
-        run: sudo apt install -y libpopt-dev
+        run: sudo apt install -y libpopt-dev libglib2.0-dev
 
       - name: Install gputils
         run: |
@@ -34,7 +34,7 @@ jobs:
           sudo make install
 
       - name: Check out the code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Build the firmware
         run: make gateway.hex diagnose.hex interface.hex
@@ -50,7 +50,7 @@ jobs:
         run: make test
 
       - name: Upload gateway firmware
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gateway
           path: |
@@ -60,7 +60,7 @@ jobs:
             gateway.map
 
       - name: Upload diagnose firmware
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: diagnose
           path: |
@@ -70,7 +70,7 @@ jobs:
             diagnose.map
 
       - name: Upload interface firmware
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: interface
           path: |
