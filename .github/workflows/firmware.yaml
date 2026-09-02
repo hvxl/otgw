@@ -15,7 +15,9 @@ jobs:
 
     steps:
       - name: Install necessary packages
-        run: sudo apt install -y libpopt-dev libglib2.0-dev libreadline-dev
+        run: |
+	  sudo apt update
+	  sudo apt install -y libpopt-dev libglib2.0-dev libreadline-dev
 
       - name: Install gputils
         run: |
