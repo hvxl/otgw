@@ -13,7 +13,7 @@
 ;5) Measure and report voltages detected on the Opentherm interfaces
 ;6) Measure periods of no activity on the opentherm lines.
 ;
-#define		version		"2.1.1"
+#define		version		"2.2"
 
 		__config	H'8007', B'00101111111100'
 		__config	H'8008', B'11101011111111'
@@ -75,7 +75,7 @@ oldvalueh	res	1
 oldvaluel	res	1
 newvalueh	res	1
 newvaluel	res	1
-bcdbuffer	res	4		;A 24-bit binary fits in 8 BCD digits
+bcdbuffer	res	4	;A 24-bit binary fits in 8 BCD digits
 
 counter		res	1
 valuel		res	1
@@ -100,6 +100,7 @@ LineVoltage	res	1	;The measured voltage on the thermostat input
 VoltShort	res	1	;Threshold for shorted line
 VoltLow		res	1	;Threshold for low logical level
 VoltOpen	res	1	;Threshold for open line
+ROMCode		res	8	;Temperature sensor 64-bit ROM code
 
 Bank2data	udata
 input		res	80
@@ -116,7 +117,8 @@ ccpsaveh	res	1
 ;Variables used by test 1
 testdata	udata_ovr
 ledcounter	res	1
-leds		res	1
+#define		ledtestextra	flags,0
+#define		ledtestend	flags,1
 
 ;Variables used by test 2 & 3
 testdata	udata_ovr
@@ -152,6 +154,16 @@ millisecs2	res	1
 #define		IdleDataAvail	idleflags,6
 #define		IdleSubsequent	idleflags,5
 
+;Variables used by test 7
+float1		res	1
+float2		res	1
+savestage	res	1
+#define		tempdone	flags,0
+#define		tempaddr	flags,1
+#define		tempfail	flags,2
+#define		temp18b20	temp,7
+#define		ds18b20		sensorstage,7
+
 ;The linker has trouble assigning linear memory space, so we hack it
 ;Linear memory address range is 0x2000 - 0x23EF
 linear0		udata	0x2200		;32 bytes into bank 6
@@ -162,8 +174,11 @@ buffer		res	0		;Space for 120 transitions, 2 bytes each
 #define		SlaveOut	PORTA,3
 #define		SlaveMask	b'00001000'
 
-		extern	SelfProg
+		extern	SelfProg, sensorstage
 		global	Voltages, BitLenMaster
+
+		extern	Temperature
+		global	float1, float2, temp, StoreTempValue
 
 ResetVector	code	0x0000
 		pagesel	SelfProg
@@ -325,7 +340,7 @@ WaitConvert	btfsc	ADCON0,GO	;Check that A/D conversion is finished
 		clrf	txhead
 		clrf	txtail
 
-#define		MAXTEST	6
+#define		MAXTEST	7
 
 MainLoop	bcf	INTCON,GIE	;Disable interrupts
 		;Configure timer 0
@@ -353,9 +368,9 @@ MainLoop	bcf	INTCON,GIE	;Disable interrupts
 		bcf	SlaveOut	;Prevent low-voltage heat demand
 
 		;Display the menu
-		movlw	Banner
+		movlw	P_Banner
 		call	Print
-		movlw	Prompt
+		movlw	P_Prompt
 		call	Print
 		banksel	RCSTA		;Bank 3
 		btfsc	RCSTA,OERR
@@ -374,7 +389,7 @@ MainLoop	bcf	INTCON,GIE	;Disable interrupts
 
 BadTest		btfsc	RCSTA,FERR
 		goto	Break
-		movlw	InvalidTestStr
+		movlw	P_InvalidTest
 		call	Print
 		goto	MainLoop
 
@@ -606,40 +621,91 @@ RunTest		brw
 		goto	Voltages
 ; Test 6: Idle periods
 		goto	IdlePeriods
+; Test 7: Temperature sensor
+		goto	TempSensor
 
 ;Test 1:
-LEDTest		clrf	leds
-		movlw	1
-		movwf	ledcounter
+LEDTest		clrf	flags		;Start with only the standard 4 LEDS
 		banksel	OPTION_REG	;Bank 1
 		movlw	b'11010111'	;1:256 prescaler
 		movwf	OPTION_REG	;Make timer 0 run as slow as possible
-		banksel	ledcounter	;Bank 0
+		banksel	TMR0		;Bank 0
+		clrf	TMR0
+		clrf	loopcounter
 TestLoop1	clrwdt
-		call	CheckReturn
+		btfsc	ledtestend
+		return
+		movfw	loopcounter
+		incf	loopcounter,F
+		brw
+		bra	LEDTestLEDA
+		bra	LEDTestLEDB
+		bra	LEDTestLEDC
+		bra	LEDTestLEDD
+		bra	LEDTestLEDE
+		bra	LEDTestLEDF
+LEDTestLEDA	bcf	PORTB,RB3
+		call	LEDTestDelay
+		bsf	PORTB,RB3
+		bra	TestLoop1
+LEDTestLEDB	bcf	PORTB,RB4
+		call	LEDTestDelay
+		bsf	PORTB,RB4
+		bra	TestLoop1
+LEDTestLEDC	bcf	PORTB,RB6
+		call	LEDTestDelay
+		bsf	PORTB,RB6
+		bra	TestLoop1
+LEDTestLEDD	bcf	PORTB,RB7
+		call	LEDTestDelay
+		bsf	PORTB,RB7
+		btfss	ledtestextra
+		clrf	loopcounter
+		bra	TestLoop1
+LEDTestLEDE	bcf	PORTA,RA6
+		call	LEDTestDelay
+		bsf	PORTA,RA6
+		bra	TestLoop1
+LEDTestLEDF	bcf	PORTA,RA7
+		call	LEDTestDelay
+		bsf	PORTA,RA7
+		clrf	loopcounter
+		bra	TestLoop1
+
+LEDTestDelay	movlw	2
+		movwf	ledcounter
+LEDTestDelayL1	call	CheckReturn
 		skpnz
-		goto	LEDTestEnd
+		bra	LEDTestEnd
+		xorlw	'\r'
+		skpz
+		call	LEDTestKey
 		btfss	INTCON,TMR0IF
-		goto	TestLoop1
+		bra	LEDTestDelayL1
 		bcf	INTCON,TMR0IF
 		decfsz	ledcounter,F
-		goto	TestLoop1
-		movlw	1
-		movwf	ledcounter
-		clrc
-		rlf	leds,F
-		tstf	leds
+		bra	LEDTestDelayL1
+		return
+LEDTestEnd	bsf	ledtestend
+		banksel	TRISA
+		bsf	TRISA,TRISA6
+		bsf	TRISA,TRISA7
+		banksel	PORTA
+		return
+
+LEDTestKey	xorlw	'4'
 		skpnz
-		bsf	leds,3
-		btfsc	leds,5
-		rlf	leds,F
-		movlw	b'11011000'
-		iorwf	PORTB,F
-		comf	leds,W
-		andwf	PORTB,F
-		goto	TestLoop1
-LEDTestEnd	movlw	b'11011000'
-		iorwf	PORTB,F
+		bcf	ledtestextra
+		xorlw	'4' ^ '6'
+		skpz
+		return
+		bsf	ledtestextra
+		bsf	PORTA,RA6
+		bsf	PORTA,RA7
+		banksel	TRISA
+		bcf	TRISA,TRISA6
+		bcf	TRISA,TRISA7
+		banksel	PORTA
 		return
 
 ;Test 2 & 3: Measure the length of the individual pulses and report them over
@@ -765,26 +831,26 @@ LoopDelayWait	clrwdt
 		banksel	0		;Bank 0
 		skpz
 		bra	LoopDelayWait	;Repeat
-		movlw	Symmetry0Str
+		movlw	P_Symmetry0
 		call	Print
 		movlw	b'00000010'	;Gate is active low, Comparator 1
 		call	Check		;Test OK1A high to low transition
-		movlw	Symmetry1Str
+		movlw	P_Symmetry1
 		call	Print
 		movlw	b'01000010'	;Gate is active high, Comparator 1
 		call	Check		;Test OK1A low to high transition
-		movlw	Symmetry2Str
+		movlw	P_Symmetry2
 		call	Print
 		movlw	b'00000011'	;Gate is active low, Comparator 2
 		call	Check		;Test OK1B high to low transition
-		movlw	Symmetry3Str
+		movlw	P_Symmetry3
 		call	Print
 		movlw	b'01000011'	;Gate is active high, Comparator 2
 		call	Check		;Test OK1B low to hight transition
 LoopCleanUp	clrf	T1CON
 		clrf	T1GCON
 		return
-NoLoop		movlw	NoLoopError
+NoLoop		movlw	P_NoLoopError
 		call	Print
 		bra	LoopCleanUp
 
@@ -827,12 +893,12 @@ DelayLoop	clrwdt
 		btfsc	TMR1L,0
 		movlw	'5'
 		call	PrintChar
-		movlw	MicroSecStr
+		movlw	P_MicroSec
 		call	Print
 		return
 
 NoResponse	bcf	T1CON,TMR1ON
-BadResponse	movlw	DelayLoopError
+BadResponse	movlw	P_DelayLoopErr
 		call	Print
 		return
 
@@ -856,7 +922,7 @@ Voltages	btfsc	NoThermostat	;Thermostat connected?
 		clrf	valuel
 		call	AnalogValue	;Get measurement in accu B
 		call	divide		;Calculate value / accub
-		movlw	PowerStr
+		movlw	P_Power
 		call	Print
 		;Save the measured supply voltage for future calculations
 		movfw	accual
@@ -869,7 +935,7 @@ Voltages	btfsc	NoThermostat	;Thermostat connected?
 
 		movlw	DACVREF
 		call	SelectADChannel
-		movlw	Analog2Str
+		movlw	P_Analog2
 		call	Print
 		call	AnalogValue
 ;Calculate Supply * AccuB / 1024
@@ -878,24 +944,24 @@ Voltages	btfsc	NoThermostat	;Thermostat connected?
 		call	PrintDotted
 		call	PrintNewline
 
-		movlw	Analog0Str
+		movlw	P_Analog0
 		call	Print
 		movlw	ANALOG0
 		call	SelectADChannel
 		movlw	levels1
 		call	FindLevels	;Find all stable voltage levels
-		movlw	Analog1Str
+		movlw	P_Analog1
 		call	Print
 		movlw	ANALOG1
 		call	SelectADChannel
 		movlw	levels2
 		call	FindLevels	;Find all stable voltage levels
-		movlw	VoltRefStr
+		movlw	P_VoltRef
 		call	Print
 		call	FindVoltRef
 		movwf	default
 		call	PrintDigit
-		movlw	VoltRefPrompt
+		movlw	P_VoltRefPrompt
 		call	Print
 		call	GetString
 		skpz			;No error
@@ -912,8 +978,8 @@ SetVoltRef	lslf	WREG,W		;Multiply by 2
 		movwf	DACCON1
 		movlb	0		;Bank 0
 		goto	MainLoop
-BadVoltRef	movlw	InvalidValue
-		call	Print		
+BadVoltRef	movlw	P_InvalidValue
+		call	Print
 		goto	MainLoop
 
 SelectADChannel	;Common ADC configuration
@@ -1259,12 +1325,170 @@ IdlePerCleanUp	bcf	T1CON,TMR1ON	;Stop timer 1
 
 CheckReturn	clrz
 		btfss	PIR1,RCIF
-		return
+		retlw	'\r'
 		banksel	RCREG
 		movfw	RCREG
 		banksel	0
-		sublw	'\r'
+		xorlw	'\r'
 		return
+
+; Test 7
+TempSensor	;Perform some checks of the I/O pins
+		banksel	LATA
+		bsf	LATA,LATA6	;Prepare power line: high
+		bsf	LATA,LATA7	;Prepare data line: high
+		banksel	TRISA
+		bcf	TRISA,TRISA6	;Make power line output
+		bcf	TRISA,TRISA7	;Make data line output
+		banksel	PORTA
+		btfss	PORTA,RA6	;Check power line is high
+		bra	F_TempShortA6
+		btfss	PORTA,RA7	;Check data line is high
+		bra	F_TempShortA7
+		bcf	PORTA,RA7	;Make data line low
+		btfsc	PORTA,RA7	;Check data line is low
+		bra	F_TempShortA7
+		banksel	TRISA
+		bsf	TRISA,TRISA7	;Make data line input
+		banksel	PORTA
+		btfss	PORTA,RA7	;Check data line is high
+		bra	F_TempPullUp
+
+		call	TempSensorDelay	;Introduce a power-up delay
+		clrf	flags		;Clear all flags
+		clrf	sensorstage	;Reset the state machine
+		clrf	loopcounter
+		call	TempSensorSteps
+		btfsc	tempfail
+		bra	TempSensorFail
+		movlw	P_SensorFound
+		call	Print
+		movlw	P_DS18S20
+		btfsc	temp18b20
+		movlw	P_DS18B20
+		call	Print
+		call	PrintNewline
+		movlw	ROMCode
+		movwf	FSR0L
+		clrf	FSR0H
+		movlw	8
+		movwf	loopcounter
+		movlw	P_ROMCode
+		call	Print
+TempSensorPrL1	call	PrintChar
+		moviw	FSR0++
+		call	PrintHex
+		decfsz	loopcounter,F
+		bra	TempSensorPrL1
+		call	PrintNewline
+		movlw	P_Measurement
+		call	Print
+		call	PrintFloat
+TempSensorDone	call	PrintNewline
+		banksel	TRISA
+		bsf	TRISA,RA6	;Release GPIO1
+		bsf	TRISA,RA7	;Release GPIO2
+		banksel	PORTA
+		return
+
+TempSensorFail	movfw	temp
+		andlw	0x7f
+		addlw	-1
+		skpnz
+		bra	F_TempDetect	;Failed at step 0: No presence pulse 
+		addlw	-6
+		skpnz
+		bra	F_TempSensor	;Failed at step 6: Read family code
+		addlw	-12
+		skpnz
+		bra	F_TempCRC	;Failed at step 18: Read CRC
+		movlw	P_TempFailed
+		call	Print
+		movfw	temp
+		andlw	0x7f
+		call	PrintByte
+		bra	TempSensorDone
+F_TempShortA6	movlw	P_TempShortA6
+		bra	TempSensorPrint
+F_TempShortA7	movlw	P_TempShortA7
+		bra	TempSensorPrint
+F_TempPullUp	movlw	P_TempPullUp
+		bra	TempSensorPrint
+F_TempDetect	movlw	P_TempDetect
+		bra	TempSensorPrint
+F_TempSensor	movlw	P_TempSensor	;Happens with DS18B20 + DS18S20
+		bra	TempSensorPrint
+F_TempCRC	movlw	P_TempAddrCRC	;Happens with more than one device
+		btfsc	tempaddr
+		movlw	P_TempSPadCRC
+TempSensorPrint	call	Print
+		bra	TempSensorDone
+
+TempSensorSteps	setz			;Zero bit must be set to proceed
+		lcall	Temperature	;Perform one step of the sequence
+		pagesel	$
+		btfsc	tempdone
+		return
+		iorlw	0		;Check if a delay is needed
+		skpnz
+		call	TempSensorDelay	;Delay for the measurement to be done
+		tstf	loopcounter
+		skpz
+		bra	TempSensorROM
+		movfw	sensorstage
+		andlw	b'11111'
+		xorlw	7
+		skpz
+		bra	TempSensorSteps
+		movfw	sensorstage
+		movwf	savestage
+		addlw	5		;Jump to step 12 to read the ROM code
+		movwf	sensorstage
+		movlw	ROMCode		;Set up indirect addressing
+		movwf	FSR0L
+		clrf	FSR0H
+		movlw	8		;ROM code is 8 bytes
+		movwf	loopcounter
+TempSensorROM	movfw	temp
+		movwi	FSR0++
+		decfsz	loopcounter,F
+		bra	TempSensorSteps
+		movfw	savestage	;Resume the normal sequence
+		movwf	sensorstage
+		bra	TempSensorSteps
+
+TempSensorDelay	movlw	b'00111000'
+		movwf	T1CON
+		movlw	low (65536 - 500000 / 8)
+		movwf	TMR1L
+		movlw	high (65536 - 500000 / 8)
+		movwf	TMR1H
+		bsf	T1CON,TMR1ON
+		clrwdt
+		bcf	PIR1,TMR1IF
+TempSensorDlyL1	btfss	PIR1,TMR1IF
+		bra	TempSensorDlyL1
+		bsf	T1CON,TMR1ON
+		return
+
+StoreTempValue	skpnc			;Carry indicates a failed reading
+		bra	StoreTempFail
+		btfsc	tempaddr
+		bra	StoreTempDone
+		bsf	tempaddr
+		return
+StoreTempFail	bsf	tempfail
+		bra	StoreTempEnd
+StoreTempDone	movfw	float1
+		movwf	valueh
+		movfw	float2
+		movwf	valuel
+StoreTempEnd	movfw	sensorstage
+		movwf	temp
+		bsf	tempdone	;The measurement attempt is finished
+		return
+
+; End of test implementations
 
 PrintNewline	movlw	'\r'
 		call	PrintChar
@@ -1275,6 +1499,15 @@ Print
 		banksel	EEADRH		;Bank 3
 		movwf	EEADRL
 		movlw	high Strings
+		movwf	EEADRH
+		clrf	EECON1
+		bsf	EECON1,EEPGD
+		bsf	EECON1,RD
+		nop
+		nop
+		movfw	EEDATL
+		movwf	EEADRL
+		movfw	EEDATH
 		movwf	EEADRH
 PrintString
 		banksel	EECON1		;Bank 3
@@ -1300,17 +1533,18 @@ PrintString
 		bra	PrintString
 PrintStrDone
 		movlb	0
-		return
+		retlw	' '
 
 PrintStrChar	andlw	b'01111111'
 		xorlw	EOS
 		skpnz
-		return
+		retlw	' '
 		xorlw	EOS
 		skpz
 		call	PrintChar
 		clrz
-		return
+		retlw	' '
+
 
 PrintDotted	bsf	decimaldot
 PrintDecimal	movlw	24
@@ -1383,18 +1617,33 @@ PrintBCD	andlw	b'1111'
 		bra	PrintDigit
 		return
 
-PrintFloat	movfw	valueh
+PrintFloat	incfsz	float2,W	;Check if the 2nd byte is 0xff
+		bra	PrintFloatJ1
+		incf	float1,F	;Round up to the next integral number
+		clrf	float2		;--
+PrintFloatJ1	movfw	float1
 		call	PrintByte
 		movlw	100
 		movwf	temp
-		movfw	valuel
-;		call	Multiply
-		btfsc	valuel,7
-		incf	valueh,F
-		movfw	valueh
+		movfw	float2
+		call	Multiply
+		btfsc	float2,7
+		incf	float1,F	;Rounding
+		movfw	float1
 		movwf	temp
 		movlw	'.'
 		goto	PrintFraction
+
+PrintHex	movwf	temp		;Temporarily store the byte
+		swapf	temp,W		;Get the high nibble
+		call	PrintXChar	;And print it
+		movfw	temp		;Next, get the low nibble
+PrintXChar	andlw	B'00001111'	;Extract the low nible
+		addlw	-10		;Check if it is a digit or alpha char
+		skpnc
+		addlw	'A' - '9' - 1	;Bridge the gap in the ASCII table
+		addlw	10 + '0'	;Re-add the amount subtracted earlier
+		bra	PrintChar	
 
 PrintByte	bsf	leadingzero
 		movwf	temp
@@ -1462,12 +1711,30 @@ PrintFlush	movlw	high txbuffer
 		movfw	INDF1		;Get the first character in the queue
 		bra	PrintTransmit	;Transmit the character
 
+;Multiply W by temp - result in float1:float2
+Multiply	clrf	float1
+		clrf	float2
+		xorlw	8
+		movwf	loopcounter
+		xorlw	8
+		xorwf	loopcounter,F
+MultiplyLoop	lslf	float2,F
+		rlf	float1,F
+		rlf	temp,F
+		skpnc
+		addwf	float2,F
+		skpnc
+		incf	float1,F
+		decfsz	loopcounter,F
+		goto	MultiplyLoop
+		return
+
 multiplysupply	movfw	supplyl
 		movwf	accual
 		movfw	supplyh
 		movwf	accuah
 ;Double Precision Multiply ( 16x16 -> 32 )
-multiply	movlw	16
+		movlw	16
 		movwf	loopcounter
 		clrf	valuex
 		clrf	valueu
@@ -1530,32 +1797,78 @@ divideskip	lsrf	accubu,F
 		bra	divideloop
 		return
 
-;Put all strings in a fixed 256 word section to allow simple access
-Strings		equ	0x1e00
+;Place the table of string pointers at the start of a memory page. This makes
+;it easy to reference and causes no unnecessary memory fragmentation
+Strings		equ	0x800
 		code	Strings
-Banner		da	"\r\nOpentherm gateway diagnostics - Version ", version
+P_Banner	dw	S_Banner
+P_Prompt	dw	S_Prompt
+P_InvalidTest	dw	S_InvalidTest
+P_NoLoopError	dw	S_NoLoopError
+P_DelayLoopErr	dw	S_DelayLoopErr
+P_Power		dw	S_Power
+P_Analog0	dw	S_Analog0
+P_Analog1	dw	S_Analog1
+P_Analog2	dw	S_Analog2
+P_Symmetry0	dw	S_Symmetry0
+P_Symmetry1	dw	S_Symmetry1
+P_Symmetry2	dw	S_Symmetry2
+P_Symmetry3	dw	S_Symmetry3
+P_MicroSec	dw	S_MicroSec
+P_VoltRef	dw	S_VoltRef
+P_VoltRefPrompt	dw	S_VoltRefPrompt
+P_InvalidValue	dw	S_InvalidValue
+P_SensorFound	dw	S_SensorFound
+P_DS18S20	dw	S_DS18S20
+P_DS18B20	dw	S_DS18B20
+P_ROMCode	dw	S_ROMCode
+P_Measurement	dw	S_Measurement
+P_TempShortA6	dw	S_TempShortA6
+P_TempShortA7	dw	S_TempShortA7
+P_TempPullUp	dw	S_TempPullUp
+P_TempDetect	dw	S_TempDetect
+P_TempSensor	dw	S_TempSensor
+P_TempAddrCRC	dw	S_TempAddrCRC
+P_TempSPadCRC	dw	S_TempSPadCRC
+P_TempFailed	dw	S_TempFailed
+
+S_Banner	da	"\r\nOpentherm gateway diagnostics - Version ", version
 		da	"\r\n\n\032"
-Prompt		da	"1. LED test\r\n"
+S_Prompt	da	"1. LED test\r\n"
 		da	"2. Bit timing thermostat\r\n"
 		da	"3. Bit timing boiler\r\n"
 		da	"4. Delay symmetry\r\n"
 		da	"5. Voltage levels\r\n"
-		da	"6. Idle times\r\n\n"
-		da	"Enter test number: \032"
-InvalidTestStr	da	"Invalid test\032"
-NoLoopError	da	"### Error: Interfaces don't appear to be looped\032"
-DelayLoopError	da	"### Error\r\n\032"
-PowerStr	da	"Power supply: \032"
-Analog0Str	da	"Thermostat\032"
-Analog1Str	da	"Boiler\032"
-Analog2Str	da	"Reference: \032"
-Symmetry0Str	da	"OK1A high-to-low: \032"
-Symmetry1Str	da	"OK1A low-to-high: \032"
-Symmetry2Str	da	"OK1B high-to-low: \032"
-Symmetry3Str	da	"OK1B low-to-high: \032"
-MicroSecStr	da	"us\r\n\032"
-VoltRefStr	da	"Reference voltage setting (0..9) [\032"
-VoltRefPrompt	da	"]: \032"
-InvalidValue	da	"Invalid value\032"
+		da	"6. Idle times\r\n"
+		da	"7. Temperature sensor\r\n"
+		da	"\nEnter test number: \032"
+S_InvalidTest	da	"Invalid test\032"
+S_NoLoopError	da	"### Error: Interfaces don't appear to be looped\032"
+S_DelayLoopErr	da	"### Error\r\n\032"
+S_Power		da	"Power supply: \032"
+S_Analog0	da	"Thermostat\032"
+S_Analog1	da	"Boiler\032"
+S_Analog2	da	"Reference: \032"
+S_Symmetry0	da	"OK1A high-to-low: \032"
+S_Symmetry1	da	"OK1A low-to-high: \032"
+S_Symmetry2	da	"OK1B high-to-low: \032"
+S_Symmetry3	da	"OK1B low-to-high: \032"
+S_MicroSec	da	"us\r\n\032"
+S_VoltRef	da	"Reference voltage setting (0..9) [\032"
+S_VoltRefPrompt	da	"]: \032"
+S_InvalidValue	da	"Invalid value\032"
+S_SensorFound	da	"Sensor type: \032"
+S_DS18S20	da	"DS18S20\032"
+S_DS18B20	da	"DS18B20\032"
+S_ROMCode	da	"ROM code:\032"
+S_Measurement	da	"Measured temperature: \032"
+S_TempShortA6	da	"Short circuit on power line\032"
+S_TempShortA7	da	"Short circuit on data line\032"
+S_TempPullUp	da	"Missing pull up resistor\032"
+S_TempDetect	da	"No 1-wire device detected\032"
+S_TempSensor	da	"Unsupported 1-wire device type\032"
+S_TempAddrCRC	da	"Invalid ROM code CRC\032"
+S_TempSPadCRC	da	"Invalid data CRC\032"
+S_TempFailed	da	"Sensor reading failed at step \032"
 
 		end

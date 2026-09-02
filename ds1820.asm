@@ -37,7 +37,7 @@ crc		res	1
 #endif
 		extern	float1, float2, temp, StoreTempValue
 
-		global	Temperature
+		global	sensorstage, Temperature
 Temperature	CODE
 Temperature	skpz			;Zero bit indicates no message in prog
 		goto	Restart		;Sequence interrupted by OT message
@@ -86,6 +86,11 @@ PresencePulse	bcf	IOPORT		;Prepare the output latch
 		btfsc	IOPORT		;Check the 1-wire line
 		goto	Restart		;No device detected
 		call	Delay240	;Wait for the presence pulse to end
+		movlw	180		;Bring the total time for the presence
+		call	Delay		;  pulse up to the 480us minimum
+#ifdef CHECKCRC
+		clrf	crc
+#endif
 		retlw	CONTINUE
 
 Measure		movlw	CONVERTT	;Initiate temperature conversion
@@ -109,24 +114,20 @@ ReadFamily	call	ReadByte	;Read family code from the 1-wire bus
 ReadCommand	movlw	READSCRATCHPAD	;The scratchpad contains the temerature
 		goto	WriteByte	;Send the command on the 1-wire bus
 
-ReadLSB
-#ifdef CHECKCRC
-		clrf	crc
-#endif
-		call	ReadByte	;Read the first scratchpad byte
+ReadLSB		call	ReadByte	;Read the first scratchpad byte
 		movfw	temp
 		movwf	lsbstorage	;Save the byte for later use
 		retlw	CONTINUE
 
 ReadMSB		call	ReadByte	;Read the second scratchpad byte
-#ifdef CHECKCRC
 		movfw	temp
 		movwf	msbstorage
+#ifdef CHECKCRC
 		retlw	CONTINUE
 #endif
 CalcTemperature	btfsc	ds18b20		;Check which sensor type was found
 		goto	HighPrecision	;A DS18B20 stores the value differently
-		rrf	temp,W		;Sign of the temperature value
+		rrf	msbstorage,W	;Sign of the temperature value
 		rrf	lsbstorage,W	;Determine the full degrees
 		movwf	float1
 		clrf	float2
@@ -135,12 +136,12 @@ CalcTemperature	btfsc	ds18b20		;Check which sensor type was found
 HighPrecision	swapf	lsbstorage,W	;Get the 1/16 degrees in the high nibble
 		andlw	b'11110000'
 		movwf	float2		;Store as temperture low byte
-		swapf	temp,W		;Get the upper nibble of the degrees
+		swapf	msbstorage,W	;Get the upper nibble of the degrees
 		andlw	b'11110000'
-		movwf	temp		;Save for later use
+		movwf	msbstorage	;Save for later use
 		swapf	lsbstorage,W
 		andlw	b'1111'		;Get the lower nibble of the degrees
-		iorwf	temp,W		;Combine with the saved upper nibble
+		iorwf	msbstorage,W	;Combine with the saved upper nibble
 		movwf	float1		;Store as temperature high byte
 Success		xorlw	85		;Test against powerup value
 		skpnz
@@ -155,8 +156,6 @@ ReadCRC		call	ReadByte	;Read the CRC
 		tstf	crc		;Check that the CRC ended up at 0
 		skpz			;CRC OK
 		goto	Restart		;Not a valid measurement
-		movfw	msbstorage
-		movwf	temp
 		goto	CalcTemperature
 #endif
 
