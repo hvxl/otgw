@@ -13,7 +13,7 @@
 ;5) Measure and report voltages detected on the Opentherm interfaces
 ;6) Measure periods of no activity on the opentherm lines.
 ;
-#define		version		"2.2"
+#define		version		"2.2.1"
 
 		__config	H'8007', B'00101111111100'
 		__config	H'8008', B'11101011111111'
@@ -1333,31 +1333,48 @@ CheckReturn	clrz
 		return
 
 ; Test 7
-TempSensor	;Perform some checks of the I/O pins
+TempSensor	;Perform some checks of the I/O pins. First the power line
 		banksel	LATA
-		bsf	LATA,LATA6	;Prepare power line: high
+		bsf	LATA,LATA6	;Prepare the power line: high
+		banksel	TRISA
+		bcf	TRISA,TRISA6	;Make the power line output
+		banksel	PORTA
+		btfss	PORTA,RA6	;Check the power line is high
+		bra	F_TempShortA6
+		call	TempSensorDelay	;Keep the power stable for a while
+		;Next, check the data line
+		banksel	LATA
 		bsf	LATA,LATA7	;Prepare data line: high
 		banksel	TRISA
-		bcf	TRISA,TRISA6	;Make power line output
-		bcf	TRISA,TRISA7	;Make data line output
+		bcf	TRISA,TRISA7	;Make the data line output
 		banksel	PORTA
-		btfss	PORTA,RA6	;Check power line is high
-		bra	F_TempShortA6
-		btfss	PORTA,RA7	;Check data line is high
+		btfss	PORTA,RA7	;Check the data line is high
 		bra	F_TempShortA7
-		bcf	PORTA,RA7	;Make data line low
-		btfsc	PORTA,RA7	;Check data line is low
+		bcf	PORTA,RA7	;Make the data line low
+		btfsc	PORTA,RA7	;Check the data line is low
 		bra	F_TempShortA7
+		movlw	8
+		movwf	loopcounter
 		banksel	TRISA
-		bsf	TRISA,TRISA7	;Make data line input
+		bsf	TRISA,TRISA7	;Make the data line input
 		banksel	PORTA
-		btfss	PORTA,RA7	;Check data line is high
-		bra	F_TempPullUp
+pulluploop	rlf	PORTA,W		;Put RA7 into the carry bit
+		rlf	temp,F		;Store the sample
+		decfsz	loopcounter,F
+		bra	pulluploop	;Repeat 8 times
+;From MSB to LSB there should now be zero or more 0 bits, followed by 1 or more
+;1 bits. In other words, the value should be 2^n - 1, but not 0. To check if a
+;number X is 2^n - 1, perform a boolean AND of X and X+1. Result should be 0.
+		tstf	temp
+		skpnz
+		bra	F_TempPullUp	;The data line remained low
+		incf	temp,W
+		andwf	temp,W		;Check for 2^n - 1
+		skpz
+		bra	F_TempPullUp	;The data line fluctuated
 
-		call	TempSensorDelay	;Introduce a power-up delay
 		clrf	flags		;Clear all flags
 		clrf	sensorstage	;Reset the state machine
-		clrf	loopcounter
 		call	TempSensorSteps
 		btfsc	tempfail
 		bra	TempSensorFail
@@ -1413,7 +1430,11 @@ F_TempShortA6	movlw	P_TempShortA6
 F_TempShortA7	movlw	P_TempShortA7
 		bra	TempSensorPrint
 F_TempPullUp	movlw	P_TempPullUp
-		bra	TempSensorPrint
+		call	Print
+		call	PrintChar
+		movfw	temp
+		call	PrintHex
+		bra	TempSensorDone
 F_TempDetect	movlw	P_TempDetect
 		bra	TempSensorPrint
 F_TempSensor	movlw	P_TempSensor	;Happens with DS18B20 + DS18S20
